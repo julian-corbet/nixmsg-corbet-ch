@@ -1,6 +1,7 @@
 #
-# Home-manager module — session behavior for enabled apps: autostart and workspace-pin intent.
-# Deliberately compositor-agnostic (see modules/nixmsg.nix's header) and deliberately does not
+# Home-manager module — session behavior for enabled apps: autostart, workspace-pin intent, and
+# per-app runtime tuning (Wayland flags, data-dir relocation, teams-for-linux config). Deliberately
+# compositor-agnostic (see the autostart/pin options' own history below) and deliberately does not
 # duplicate the system-plane `nixmsg.apps.<name>.enable` list — this module takes its OWN
 # `autostart`/`workspacePin` selections (same shape as modules/nixmsg.nix's system-plane
 # options), because home-manager and NixOS/system-manager are separate evaluation planes in this
@@ -9,22 +10,70 @@
 # both lists to the same values; this module does not invent cross-plane machinery to avoid that
 # one line of duplication.
 #
+# WHY A .desktop OVERRIDE MECHANISM EXISTS AT ALL. Verified live (a live Arch host, 2026-08-03),
+# not assumed: three of the four Electron apps in this catalogue (Discord, Signal, Element) do not
+# reliably pick up native Wayland rendering or an `ELECTRON_OZONE_PLATFORM_HINT` env var — Discord
+# specifically bundles its own (often lagging) Electron via a bootstrap wrapper script with no
+# flags-file support at all (confirmed by reading `/usr/bin/discord`: it just `exec`s argv
+# through). The one reliable injection point for all three is the `.desktop` file's own `Exec=`
+# line — see lib/desktop-overrides.nix for the real, live-verified upstream content each override
+# is built from. teams-for-linux and Telegram/Whatsie need none of this (teams-for-linux
+# auto-detects Wayland itself, confirmed live; Telegram/Whatsie are native Qt, not Electron).
+#
 { config, lib, ... }:
 let
   cfg = config.nixmsg.home;
   catalogue = import ../lib/catalogue.nix { };
   appNames = lib.attrNames catalogue;
+  desktopOverrides = import ../lib/desktop-overrides.nix { };
+  overrideNames = lib.attrNames desktopOverrides;
 
-  # Resolve just enough to compute a launch command and an app-id — this module does not need
-  # the full channel-resolution machinery modules/nixmsg.nix has (no archPackages/aurPackages
-  # here), only "how do I launch it" and "what's its app-id."
-  launchCommand = name:
-    let entry = catalogue.${name};
+  # An enabled override's resolved flags: the app's own researched Wayland flags, plus
+  # --user-data-dir when this app's data is being relocated (an ordinary Electron flag, not
+  # Wayland-specific — every Electron app honors it, so no per-app research was needed for this
+  # part the way the Wayland flags needed per-app verification).
+  overrideFlags = name:
+    let
+      entry = desktopOverrides.${name};
+      ov = cfg.desktopOverride.${name};
     in
-    if cfg.channel.${name} or null == "flatpak" || (entry.repo == null && entry.aur == null) then
-      "flatpak run ${entry.flatpak}"
+    entry.waylandFlags ++ lib.optional (ov.dataDir != null) "--user-data-dir=${ov.dataDir}";
+
+  overrideEnabled = name: cfg.desktopOverride ? ${name} && cfg.desktopOverride.${name}.enable;
+
+  # Resolve a launch command for `autostart` — reuses an enabled override's binary+flags so an
+  # autostarted app gets the same Wayland/data-dir treatment as its shadowed .desktop entry,
+  # rather than the two mechanisms silently disagreeing about how the app should be launched.
+  launchCommand = name:
+    if overrideEnabled name then
+      let entry = desktopOverrides.${name};
+      in lib.concatStringsSep " " ([ entry.binary ] ++ overrideFlags name)
     else
-      entry.nixpkgs; # the binary name matches the nixpkgs attribute for every catalogue entry today
+      let entry = catalogue.${name};
+      in
+      if cfg.channel.${name} or null == "flatpak" || (entry.repo == null && entry.aur == null) then
+        "flatpak run ${entry.flatpak}"
+      else
+        entry.nixpkgs; # the binary name matches the nixpkgs attribute for every catalogue entry today
+
+  mkDesktopFileText = name:
+    let
+      entry = desktopOverrides.${name};
+      execLine = lib.concatStringsSep " " ([ entry.binary ] ++ overrideFlags name ++ [ entry.argsSuffix ]);
+    in
+    lib.concatStringsSep "\n" (lib.filter (l: l != null) [
+      "[Desktop Entry]"
+      "Type=Application"
+      "Name=${entry.name}"
+      "Comment=${entry.comment}"
+      (if entry ? genericName then "GenericName=${entry.genericName}" else null)
+      "Exec=${execLine}"
+      "Icon=${entry.icon}"
+      "Terminal=false"
+      "Categories=${entry.categories}"
+      "MimeType=${entry.mimeType}"
+      "" # trailing newline
+    ]);
 in
 {
   # NO nixdesktop INPUT, deliberately — same reasoning as nixdev's own flake.nix: pinning a
@@ -76,10 +125,70 @@ in
       readOnly = true;
       description = "app-ids for workspacePin.apps — feed into your compositor's own window-rule/output-assignment syntax (e.g. nixscroll's extraConfig).";
     };
+
+    # ── Per-app runtime tuning ────────────────────────────────────────────────────────────────
+    desktopOverride = lib.genAttrs overrideNames (name: {
+      enable = lib.mkEnableOption "a shadowing ~/.local/share/applications/${desktopOverrides.${name}.filename} for ${desktopOverrides.${name}.name}";
+      dataDir = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          If set, appended as --user-data-dir=<path>. Electron-only (this app's own real,
+          low-level Electron flag, not app-specific) — do not set this for a non-Electron app.
+        '';
+      };
+    });
+
+    electronWaylandHint = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Write ~/.config/environment.d/electron-wayland.conf (ELECTRON_OZONE_PLATFORM_HINT=auto).
+        Read by Electron's own runtime bootstrap, not app code — applies uniformly including to
+        apps whose .desktop override this module also generates. Harmless no-op on Electron ≥38.2
+        (which auto-detects Wayland without it) and never read by non-Electron apps at all.
+      '';
+    };
+
+    teamsConfig = {
+      enable = lib.mkEnableOption "declarative ~/.config/teams-for-linux/config.json generation";
+      trayIconEnabled = lib.mkOption { type = lib.types.bool; default = true; };
+      minimizeOnClose = lib.mkOption { type = lib.types.bool; default = true; };
+      closeAppOnCross = lib.mkOption { type = lib.types.bool; default = false; };
+      maxCacheSizeMB = lib.mkOption {
+        type = lib.types.nullOr lib.types.int;
+        default = 600;
+        description = "null disables the cache cap (teams-for-linux's own default — off).";
+      };
+    };
   };
 
   config = {
     nixmsg.home.startupCommands = map launchCommand cfg.autostart;
     nixmsg.home.pinnedAppIds = map (n: catalogue.${n}.appId) cfg.workspacePin.apps;
+
+    xdg.dataFile = lib.mapAttrs'
+      (name: _: lib.nameValuePair
+        "applications/${desktopOverrides.${name}.filename}"
+        { text = mkDesktopFileText name; })
+      (lib.filterAttrs (name: _: overrideEnabled name) desktopOverrides);
+
+    xdg.configFile = lib.mkMerge [
+      (lib.mkIf cfg.electronWaylandHint {
+        "environment.d/electron-wayland.conf".text = "ELECTRON_OZONE_PLATFORM_HINT=auto\n";
+      })
+      (lib.mkIf cfg.teamsConfig.enable {
+        "teams-for-linux/config.json".text = builtins.toJSON ({
+          trayIconEnabled = cfg.teamsConfig.trayIconEnabled;
+          minimizeOnClose = cfg.teamsConfig.minimizeOnClose;
+          closeAppOnCross = cfg.teamsConfig.closeAppOnCross;
+        } // lib.optionalAttrs (cfg.teamsConfig.maxCacheSizeMB != null) {
+          cacheManagement = {
+            enabled = true;
+            maxCacheSizeMB = cfg.teamsConfig.maxCacheSizeMB;
+          };
+        });
+      })
+    ];
   };
 }
