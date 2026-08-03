@@ -27,6 +27,13 @@ let
   catalogue = import ../lib/catalogue.nix { };
   appNames = lib.attrNames catalogue;
 
+  # The implicit default a `null` `flatpakRemote` in the catalogue means — see that field's own
+  # comment in lib/catalogue.nix for why an entry can name a different one instead.
+  flathubRemote = {
+    name = "flathub";
+    url = "https://flathub.org/repo/flathub.flatpakrepo";
+  };
+
   channelType = lib.types.nullOr (lib.types.enum [ "repo" "aur" "flatpak" ]);
 
   appOptions = name: {
@@ -141,13 +148,24 @@ in
       '';
     };
 
-    flatpakIds = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
+    flatpakApps = lib.mkOption {
+      type = lib.types.listOf lib.types.attrs;
       readOnly = true;
       description = ''
-        Enabled apps resolved to the "flatpak" channel, as Flathub application IDs. Neither a
-        NixOS nor an Arch package manager installs these — see modules/flatpak-install.nix,
-        imported by both platform backends, which installs them via a systemd oneshot.
+        Enabled apps resolved to the "flatpak" channel, as `{ id, remoteName, remoteUrl }`.
+        Neither a NixOS nor an Arch package manager installs these — see
+        modules/flatpak-install.nix, imported by both platform backends, which installs them via
+        a systemd oneshot.
+
+        Carries the remote alongside the id RATHER THAN a bare id list, because "which Flatpak
+        remote" is not always Flathub — see lib/catalogue.nix's `flatpakRemote` field, and its
+        `threema` entry specifically: `ch.threema.threema-desktop` does not exist on Flathub at
+        all, only on Threema's own repo. Deliberately ONE option carrying id+remote together,
+        not this list plus a second `id -> remote` lookup alongside it: two outputs that must be
+        indexed back together by a consumer are two outputs that can silently fall out of step
+        the moment either one gains or loses an entry on its own — the failure mode this repo's
+        own header comments call out repeatedly for other pairs it keeps merged for exactly this
+        reason. A consumer that only wants bare ids: `map (a: a.id) config.nixmsg.flatpakApps`.
       '';
     };
 
@@ -214,7 +232,13 @@ in
 
     nixmsg.archPackages = lib.unique (map (a: a.packageName) (lib.filter (a: a.channel == "repo") resolved));
     nixmsg.aurPackages = lib.unique (map (a: a.packageName) (lib.filter (a: a.channel == "aur") resolved));
-    nixmsg.flatpakIds = lib.unique (map (a: a.packageName) (lib.filter (a: a.channel == "flatpak") resolved));
+    nixmsg.flatpakApps = lib.unique (map
+      (a: {
+        id = a.packageName;
+        remoteName = if a.flatpakRemote == null then flathubRemote.name else a.flatpakRemote.name;
+        remoteUrl = if a.flatpakRemote == null then flathubRemote.url else a.flatpakRemote.url;
+      })
+      (lib.filter (a: a.channel == "flatpak") resolved));
 
     nixmsg.nixosPackages =
       lib.unique (map (a: a.nixpkgs) (lib.filter (a: a.channel != "flatpak" && a.nixpkgs != null) resolved));

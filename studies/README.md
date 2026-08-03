@@ -19,8 +19,11 @@ directly), not a guess, but it is not the same claim as "this app runs correctly
 
 **What was checked:** each catalogue entry's `repo`/`aur`/`flatpak`/`nixpkgs` identity was
 verified directly — archlinux.org package search for official-repo status, the AUR for fallback
-packages, Flathub for Flatpak IDs, and `nix search nixpkgs` for every `nixpkgs` attribute
-(confirmed live, 2026-08-03: all 7 resolve — see `../experiments/validate-nixpkgs-names.nix`).
+packages, `flatpak remote-ls flathub` for Flatpak IDs, and `nix search nixpkgs` for every
+`nixpkgs` attribute (confirmed live, 2026-08-03: all 7 `nixpkgs` attributes resolve — see
+`../experiments/validate-nixpkgs-names.nix`). Six of the seven `flatpak` IDs resolve against
+Flathub this way; the seventh (threema) does not — see the `flatpakRemote` field and the
+`threema` entry's own comment in `lib/catalogue.nix`.
 
 **Finding:** going in, the assumption was that most of these apps would be AUR-only (the common
 case for proprietary/community-wrapped Linux clients). Checked directly, four of the seven —

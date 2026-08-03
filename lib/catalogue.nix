@@ -14,9 +14,19 @@
 #              archlinux.org, not guessed — see each entry's comment for the check.
 #   aur      — an AUR package name, for when no official repo package exists (or as an
 #              alternative build).
-#   flatpak  — a Flatpak application ID (Flathub), for when no native Linux build exists at all,
-#              or where sandboxing genuinely matters more than a native package would (Threema:
-#              proprietary Electron handling E2E-encrypted content).
+#   flatpak  — a Flatpak application ID, for when no native Linux build exists at all, or where
+#              sandboxing genuinely matters more than a native package would (Threema: proprietary
+#              Electron handling E2E-encrypted content).
+#
+# `flatpakRemote` names WHICH remote `flatpak` actually lives on, `null` meaning Flathub — the
+# assumption every consumer of this catalogue used to hardcode instead of reading it from here
+# (modules/flatpak-install.nix `remote-add`'d only Flathub and installed only from it). That
+# assumption is false for Threema specifically: `ch.threema.threema-desktop` does NOT exist on
+# Flathub at all — Flathub's own Threema listing is `ch.threema.threema-web-desktop`, a DIFFERENT
+# app (the browser-wrapper variant, not the desktop client this catalogue names). The real desktop
+# client is only ever distributed from Threema GmbH's own repo. An installer that only ever knows
+# Flathub cannot install this entry — not "installs the wrong version", genuinely cannot resolve
+# the id at all. See the `threema` entry below for the live values.
 #
 # `nixpkgs` is separate from all three: the attribute under a nixpkgs instance, or `null` where
 # none exists. Every one of the 7 entries below DOES have a nixpkgs attribute (confirmed via
@@ -38,6 +48,12 @@
 # naming convention only — flagged per-entry below, and in `../experiments/README.md`. Treat those
 # three as "verify once installed" (`niri msg windows` / a scroll equivalent), not as settled.
 #
+# EVERY `flatpak` ID BELOW WAS CHECKED AGAINST A LIVE `flatpak remote-ls flathub`, not assumed —
+# six resolve there (discord, telegram, signal, element, teams, whatsapp); threema's does not
+# (confirmed live, 2026-08-03) and carries `flatpakRemote` naming its real vendor repo instead. Do
+# not add a `flatpak` id to a future entry without the same check — a wrong id is invisible at
+# eval time and only surfaces as an install failure on a real host.
+#
 { ... }:
 {
   discord = {
@@ -48,6 +64,8 @@
     aur = null;
     nixpkgs = "discord";
     flatpak = "com.discordapp.Discord";
+    # Confirmed live against `flatpak remote-ls flathub`, 2026-08-03 — genuinely on Flathub.
+    flatpakRemote = null;
     appId = "discord";
   };
 
@@ -57,6 +75,8 @@
     aur = null;
     nixpkgs = "telegram-desktop";
     flatpak = "org.telegram.desktop";
+    # Confirmed live against `flatpak remote-ls flathub`, 2026-08-03 — genuinely on Flathub.
+    flatpakRemote = null;
     # NOT "org.telegram.desktop" (that's the .desktop/flatpak id). StartupWMClass is
     # "TelegramDesktop", verified against upstream tdesktop's own lib/xdg/*.desktop source.
     appId = "TelegramDesktop";
@@ -69,6 +89,8 @@
     aur = null;
     nixpkgs = "signal-desktop";
     flatpak = "org.signal.Signal";
+    # Confirmed live against `flatpak remote-ls flathub`, 2026-08-03 — genuinely on Flathub.
+    flatpakRemote = null;
     appId = "signal";
   };
 
@@ -81,6 +103,9 @@
     nixpkgs = "element-desktop";
     # Legacy Riot naming retained upstream for compatibility.
     flatpak = "im.riot.Riot";
+    # Confirmed live against `flatpak remote-ls flathub`, 2026-08-03 — genuinely on Flathub
+    # (Flathub kept the legacy id too, not just upstream).
+    flatpakRemote = null;
     appId = "Element";
   };
 
@@ -94,6 +119,8 @@
     aur = "teams-for-linux";
     nixpkgs = "teams-for-linux";
     flatpak = "com.github.IsmaelMartinez.teams_for_linux";
+    # Confirmed live against `flatpak remote-ls flathub`, 2026-08-03 — genuinely on Flathub.
+    flatpakRemote = null;
     # Inferred from the .desktop basename / Flatpak-id convention, NOT independently confirmed
     # against a running window — see experiments/README.md #1.
     appId = "com.github.IsmaelMartinez.teams_for_linux";
@@ -114,6 +141,16 @@
     aur = "threema-desktop";
     nixpkgs = "threema-desktop";
     flatpak = "ch.threema.threema-desktop";
+    # NOT ON FLATHUB — confirmed live, 2026-08-03: `flatpak remote-ls flathub` has no
+    # ch.threema.threema-desktop at all. Flathub's own Threema listing is
+    # ch.threema.threema-web-desktop, a DIFFERENT app (the browser-wrapper variant), so this is
+    # not "the wrong Flathub build", it is an id that simply does not resolve there. The real
+    # desktop client is distributed only from Threema GmbH's own repo, matching the remote
+    # already live on this host (`flatpak remotes`, 2026-08-03).
+    flatpakRemote = {
+      name = "threema-desktop";
+      url = "https://releases.threema.ch/flatpak/threema-desktop/";
+    };
     # UNVERIFIED which of the aur/nixpkgs from-source build vs the flatpak repackage this
     # actually matches — the two are different builds and may set different app-ids.
     appId = "ch.threema.threema-desktop";
@@ -129,6 +166,8 @@
     aur = "whatsie";
     nixpkgs = "whatsie";
     flatpak = "com.ktechpit.whatsie";
+    # Confirmed live against `flatpak remote-ls flathub`, 2026-08-03 — genuinely on Flathub.
+    flatpakRemote = null;
     # Inferred from the Flatpak-id convention, NOT independently confirmed against a running
     # window — see experiments/README.md #1.
     appId = "com.ktechpit.whatsie";

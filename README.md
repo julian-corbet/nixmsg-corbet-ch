@@ -54,8 +54,9 @@ Left unset, `channel` auto-resolves to the best available channel (repo > aur > 
 | `lib/catalogue.nix` | The app catalogue: one entry per app, with its repo/aur/flatpak/nixpkgs identity and Wayland app-id. |
 | `modules/nixmsg.nix` | Platform-neutral options + channel resolution. |
 | `modules/nixos.nix`, `modules/arch.nix` | Platform backends. |
-| `modules/flatpak-install.nix` | Shared Flatpak-channel installer (systemd oneshot), imported by both backends. |
+| `modules/flatpak-install.nix` | Shared Flatpak-channel installer (systemd oneshot), imported by both backends. Remote-aware — installs each app from whichever remote its catalogue entry actually names, not just Flathub. |
 | `modules/home.nix` | Home-manager: autostart + workspace-pin. |
+| `checks/` | `nix flake check` — eval-time proof of `flatpakApps`/`flatpak-install.nix`'s rendering. |
 
 ## Platform support
 
