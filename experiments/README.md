@@ -6,7 +6,10 @@ running instance of the app. Results feed back into the catalogue as they close.
 
 `validate-nixpkgs-names.nix` is the one exception that's a real, runnable check rather than a
 question: `nix-instantiate --eval --strict experiments/validate-nixpkgs-names.nix -A missing`
-confirms every catalogue entry's `nixpkgs` attribute actually resolves (currently: all 7 do).
+confirms every catalogue entry's `nixpkgs` attribute actually resolves (currently: all 8 do) —
+resolving is a weaker claim than being the RIGHT attribute, though: it would happily say "resolves"
+for a wrong-but-existing attribute too. See `zoom`'s own comment in `lib/catalogue.nix` for why
+that distinction mattered for real this time (`pkgs.zoom` resolves, and is not Zoom).
 
 ## Table of contents
 

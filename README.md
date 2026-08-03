@@ -1,7 +1,7 @@
 # nixmsg
 
-Messenger apps — Discord, Telegram, Teams, Threema, Signal, WhatsApp, Element — declared per host
-instead of hand-installed and forgotten.
+Messenger apps — Discord, Telegram, Teams, Threema, Signal, WhatsApp, Element, Zoom — declared per
+host instead of hand-installed and forgotten.
 
 ## What this is
 

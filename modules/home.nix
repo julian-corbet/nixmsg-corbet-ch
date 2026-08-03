@@ -17,8 +17,9 @@
 # flags-file support at all (confirmed by reading `/usr/bin/discord`: it just `exec`s argv
 # through). The one reliable injection point for all three is the `.desktop` file's own `Exec=`
 # line — see lib/desktop-overrides.nix for the real, live-verified upstream content each override
-# is built from. teams-for-linux and Telegram/Whatsie need none of this (teams-for-linux
-# auto-detects Wayland itself, confirmed live; Telegram/Whatsie are native Qt, not Electron).
+# is built from. teams-for-linux and Telegram/ZapZap need none of this (teams-for-linux
+# auto-detects Wayland itself, confirmed live; Telegram/ZapZap are Qt-based, not Electron —
+# native Qt for Telegram, PyQt6 + PyQt6-WebEngine for ZapZap).
 #
 { config, lib, ... }:
 let
@@ -49,12 +50,25 @@ let
       let entry = desktopOverrides.${name};
       in lib.concatStringsSep " " ([ entry.binary ] ++ overrideFlags name)
     else
-      let entry = catalogue.${name};
+      let
+        entry = catalogue.${name};
+        requested = cfg.channel.${name} or null;
       in
-      if cfg.channel.${name} or null == "flatpak" || (entry.repo == null && entry.aur == null) then
+      if requested == "flatpak" || (entry.repo == null && entry.aur == null) then
         "flatpak run ${entry.flatpak}"
-      else
-        entry.nixpkgs; # the binary name matches the nixpkgs attribute for every catalogue entry today
+      else if requested == "aur" then
+        entry.aur
+      else if requested == "repo" then
+        entry.repo
+      # unset: same repo > aur priority the system-plane auto-resolution uses.
+      else if entry.repo != null then entry.repo
+      else entry.aur;
+  # Deliberately entry.repo/entry.aur here, NOT entry.nixpkgs — this is the Arch-platform
+  # binary name, and nixpkgs' attribute is a NixOS-ecosystem name that can legitimately differ
+  # from it. zoom is the proof: nixpkgs attribute `zoom-us`, but the actual installed binary
+  # (both the AUR package and the Flathub build agree) is `zoom` — using entry.nixpkgs here
+  # would launch a binary that doesn't exist on an Arch host. entry.repo/entry.aur happen to
+  # equal entry.nixpkgs for every other catalogue entry, so this changes nothing for them.
 
   mkDesktopFileText = name:
     let

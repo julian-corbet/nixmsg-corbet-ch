@@ -18,6 +18,19 @@
 #              sandboxing genuinely matters more than a native package would (Threema: proprietary
 #              Electron handling E2E-encrypted content).
 #
+# CHANNEL PREFERENCE ORDER, STATED ONCE HERE — never re-justified per entry below. (1) an official
+# distro repo package, when one exists: one fewer build to trust, one update path already wired
+# into the host's normal reconciler. (2) AUR, when it is a maintained vendor repackage: still ONE
+# update path (the host's AUR helper, same cadence as everything else pacman-adjacent) and it
+# avoids Flatpak's sandbox friction — file pickers that can't see the real $HOME without a portal,
+# autostart entries needing one, GTK/Qt theming falling out of step with the rest of the session.
+# (3) Flatpak, and ONLY when one of three things is true: no repo/AUR package exists at all (Teams;
+# WhatsApp/ZapZap until nixpkgs picked it up); an operator's account is ALREADY linked to a Flatpak
+# identity and re-pairing a messenger is an interactive device event — a QR scan, a phone code —
+# that no package manager can redo (Threema, see that entry for the live case); or sandboxing a
+# proprietary blob away from $HOME is itself the goal, not a fallback. Each entry's own comment
+# says WHICH of these applied to ITS channel choice, not why the order exists at all.
+#
 # `flatpakRemote` names WHICH remote `flatpak` actually lives on, `null` meaning Flathub — the
 # assumption every consumer of this catalogue used to hardcode instead of reading it from here
 # (modules/flatpak-install.nix `remote-add`'d only Flathub and installed only from it). That
@@ -29,11 +42,15 @@
 # the id at all. See the `threema` entry below for the live values.
 #
 # `nixpkgs` is separate from all three: the attribute under a nixpkgs instance, or `null` where
-# none exists. Every one of the 7 entries below DOES have a nixpkgs attribute (confirmed via
-# `nix search nixpkgs` against nixpkgs-unstable, 2026-08-03) — messenger clients turned out to
-# have better nixpkgs coverage than Arch/AUR coverage, the reverse of what a naive guess would
-# assume. Kept as its own field rather than folded into `repo` because a NixOS consumer resolves
-# through `nixpkgs`, never through `repo`/`aur`/`flatpak` — those three are Arch-platform-only.
+# none exists. Every one of the 8 entries below DOES have a nixpkgs attribute (confirmed via
+# `nix search nixpkgs` / `nix eval` against nixpkgs-unstable, 2026-08-03) — messenger clients
+# turned out to have better nixpkgs coverage than Arch/AUR coverage, the reverse of what a naive
+# guess would assume. Kept as its own field rather than folded into `repo` because a NixOS
+# consumer resolves through `nixpkgs`, never through `repo`/`aur`/`flatpak` — those three are
+# Arch-platform-only. VERIFY THE ATTRIBUTE NAME, NOT JUST ITS EXISTENCE: `zoom`'s entry below is
+# the sharp example — top-level `pkgs.zoom` resolves cleanly to a wrong, unrelated package (the
+# real one is `pkgs.zoom-us`), the same trap class as `pkgs.ark` being a Jupyter R kernel rather
+# than the KDE archiver. A wrong-but-resolving attribute is worse than a missing one: it builds.
 #
 # `appId` is the Wayland/X11 app-id (StartupWMClass) the running window advertises — what a
 # compositor's window-rule (`app-id="..."` in scroll/sway, `match app-id=` in niri) actually
@@ -42,17 +59,20 @@
 # but the StartupWMClass a compositor sees is `TelegramDesktop`), and getting this wrong produces
 # a window-rule that silently matches nothing, not an error.
 #
-# WHAT WAS VERIFIED, AND HOW SURE. Four entries (discord, telegram, signal, element) had their
-# app-id independently corroborated from upstream source or well-established compositor
-# window-rule examples. Three (teams, threema, whatsapp) rest on inference from the .desktop-file
-# naming convention only — flagged per-entry below, and in `../experiments/README.md`. Treat those
-# three as "verify once installed" (`niri msg windows` / a scroll equivalent), not as settled.
+# WHAT WAS VERIFIED, AND HOW SURE. Six entries (discord, telegram, signal, element, whatsapp,
+# zoom) had their app-id independently corroborated from upstream source, a well-established
+# compositor window-rule example, or (whatsapp, zoom) a real `.desktop` file read directly out of
+# the actual upstream/vendor package — see each entry's own comment for which. Two (teams,
+# threema) rest on inference from the .desktop-file naming convention only — flagged per-entry
+# below, and in `../experiments/README.md`. Treat those two as "verify once installed"
+# (`niri msg windows` / a scroll equivalent), not as settled.
 #
-# EVERY `flatpak` ID BELOW WAS CHECKED AGAINST A LIVE `flatpak remote-ls flathub`, not assumed —
-# six resolve there (discord, telegram, signal, element, teams, whatsapp); threema's does not
-# (confirmed live, 2026-08-03) and carries `flatpakRemote` naming its real vendor repo instead. Do
-# not add a `flatpak` id to a future entry without the same check — a wrong id is invisible at
-# eval time and only surfaces as an install failure on a real host.
+# EVERY `flatpak` ID BELOW WAS CHECKED AGAINST A LIVE FLATHUB, not assumed — seven resolve there
+# (discord, telegram, signal, element, teams, whatsapp, zoom; confirmed via `flatpak remote-ls
+# flathub` and, for whatsapp/zoom specifically, `flatpak remote-info flathub <id>`, 2026-08-03);
+# threema's does not and carries `flatpakRemote` naming its real vendor repo instead. Do not add a
+# `flatpak` id to a future entry without the same check — a wrong id is invisible at eval time and
+# only surfaces as an install failure on a real host.
 #
 { ... }:
 {
@@ -157,19 +177,62 @@
   };
 
   whatsapp = {
-    # WhatsApp has never had an official Linux client. "Whatsie" (ktechpit) is the best-
-    # maintained real option as of 2026-08-03: the same upstream project ships identically as
-    # both an AUR package and a Flathub app (28.5k monthly downloads, most popular of the
-    # WhatsApp-wrapper options), unlike competitors that were delisted (mimbrero) or fragmented
-    # under a rename (WasIstLos). No official Arch repo package.
+    # WhatsApp has never had an official Linux client, and no official Arch repo package exists
+    # for any third-party wrapper either. Between the two maintained AUR wrappers, ZapZap is the
+    # one this table names — not on features (both are WebEngine shells around web.whatsapp.com,
+    # functionally the same app), on maintenance and adoption, checked directly against the AUR,
+    # 2026-08-03:
+    #
+    #   zapzap   75 votes, popularity 5.65, last updated 2026-07-30, PyQt6 + PyQt6-WebEngine
+    #   whatsie  24 votes, popularity 1.08, last updated 2026-04-04, version string
+    #            5.1.0.r0.g004863f — a git snapshot off an untagged commit, not a tagged release
+    #
+    # Whatsie was this table's previous pick; it isn't gone from the AUR, it's simply no longer
+    # the better-maintained of the two by any measure checked here — revisit this pick if that
+    # gap closes, not on taste. (AUR also hosts "zapzap-bin", a separately-maintained, 1-vote
+    # package installing from the project's published wheel rather than building from source; not
+    # picked here because the from-source "zapzap" package already builds cleanly and carries the
+    # adoption signal above — same reasoning this table already applies to threema's from-source
+    # AUR build over a prebuilt alternative.)
     repo = null;
-    aur = "whatsie";
-    nixpkgs = "whatsie";
-    flatpak = "com.ktechpit.whatsie";
-    # Confirmed live against `flatpak remote-ls flathub`, 2026-08-03 — genuinely on Flathub.
+    aur = "zapzap";
+    nixpkgs = "zapzap";
+    flatpak = "com.rtosta.zapzap";
+    # Confirmed live against `flatpak remote-info flathub com.rtosta.zapzap`, 2026-08-03 —
+    # genuinely on Flathub.
     flatpakRemote = null;
-    # Inferred from the Flatpak-id convention, NOT independently confirmed against a running
-    # window — see experiments/README.md #1.
-    appId = "com.ktechpit.whatsie";
+    # VERIFIED, not inferred — read directly out of upstream's own
+    # share/applications/com.rtosta.zapzap.desktop at tag 6.5.2.5 (github.com/rafatosta/zapzap),
+    # the exact version nixpkgs' own `zapzap` attribute builds: `StartupWMClass=zapzap`.
+    appId = "zapzap";
+  };
+
+  zoom = {
+    # No official Arch repo package — confirmed against archlinux.org, 2026-08-03: no "zoom"
+    # package in core/extra/multilib. AUR "zoom" (738 votes, maintainer edh, updated 2026-07) is a
+    # repackage of Zoom's own vendor `.pkg.tar.xz` — Zoom ships no source at all, so unlike
+    # Threema there is no from-source alternative to weigh against it; its PKGBUILD's `package()`
+    # step is a literal `cp -dpr` of the downloaded vendor tree, confirmed by reading it.
+    repo = null;
+    aur = "zoom";
+    # NOT `pkgs.zoom` — that resolves cleanly to an unrelated package, the same trap class as
+    # `pkgs.ark` being a Jupyter R kernel rather than the KDE archiver. The real attribute is
+    # `zoom-us`. Confirmed 2026-08-03:
+    #   nix eval --raw nixpkgs#zoom-us.name  =>  zoom-7.1.0.3715
+    #   nix eval --raw nixpkgs#zoom.name     =>  zoom-1.1.5
+    # Getting this backwards doesn't error at eval time — it installs a wrong package, cleanly.
+    nixpkgs = "zoom-us";
+    flatpak = "us.zoom.Zoom";
+    # Confirmed live against `flatpak remote-info flathub us.zoom.Zoom`, 2026-08-03 — genuinely on
+    # Flathub (version 7.1.5.4332 there, a few weeks ahead of the AUR package's 7.1.5-1 but the
+    # same 7.1.5 line — nothing here suggests channel divergence worth tracking).
+    flatpakRemote = null;
+    # VERIFIED, not inferred — read directly out of the real vendor `.desktop` file, two
+    # independent ways that agree: (1) the AUR package's own vendor tarball, downloaded and
+    # extracted at usr/share/applications/Zoom.desktop, declares `StartupWMClass=zoom`; (2)
+    # Flathub's own us.zoom.Zoom.desktop (github.com/flathub/us.zoom.Zoom) independently declares
+    # the identical `StartupWMClass=zoom`. Both channels' actual shipped desktop files were read,
+    # not assumed from a naming convention.
+    appId = "zoom";
   };
 }

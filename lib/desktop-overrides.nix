@@ -10,7 +10,7 @@
 # apps whose Wayland/data-dir behavior actually requires shadowing the system `.desktop` file (see
 # modules/home.nix's header for why: confirmed live that Discord's own wrapper script has no
 # flags-file support, and Signal/Element don't read one either — the `.desktop` override is the
-# only reliable injection point for those three). Telegram and Whatsie are native Qt, not Electron
+# only reliable injection point for those three). Telegram and ZapZap are Qt-based, not Electron
 # — nothing here applies to them, they need no override at all.
 #
 # `filename` MUST match the upstream basename exactly (not the catalogue key) — confirmed live
