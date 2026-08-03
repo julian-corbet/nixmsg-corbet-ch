@@ -22,7 +22,28 @@
 # between them at the right position (immediately after the binary, before any existing arguments
 # — inserting after `%u`/`%U` would pass flags as if they were the URL argument).
 #
+# ── THE SECRET-STORE FLAG, on every Electron entry below ───────────────────────────────────────
+# Electron's safeStorage seals each app's local database key with a secret held by the desktop's
+# Secret Service, and it PICKS that backend by sniffing $XDG_CURRENT_DESKTOP at first run. On a
+# bare wlroots session that variable is frequently empty or names a compositor Electron has never
+# heard of, so the choice is whatever its fallback chain lands on that day -- and the choice is
+# then RECORDED in the app's own config as `safeStorageBackend`.
+#
+# That is a one-way trap, not a preference. An app that once sealed its key against a backend
+# which later goes away cannot unseal it again: the key decrypts to garbage, sqlcipher reports
+# `SQLITE_NOTADB: file is not a database`, and the app quits on startup with its entire local
+# history unreadable. Recovering it means re-linking the account, which is an interactive device
+# pairing no package manager can perform. Naming the backend explicitly is what keeps the choice
+# a declared fact instead of an emergent one.
+#
+# gnome-libsecret rather than kwallet: it is the org.freedesktop.secrets D-Bus interface, which
+# any Secret Service provider implements -- gnome-keyring, KeePassXC, oo7. Pinning the INTERFACE
+# rather than one implementation is what lets the provider be swapped without re-sealing.
 { ... }:
+let
+  # Applies to every Electron app here; Qt apps (telegram, zapzap) have no safeStorage at all.
+  secretStoreFlag = "--password-store=gnome-libsecret";
+in
 {
   discord = {
     # /usr/share/applications/discord.desktop
@@ -39,7 +60,7 @@
     # Electron into ~/.config/discord/ and execs it — no flags-file support, argv is the only
     # reliable injection point. Bundles its own (often lagging) Electron version, so the
     # ELECTRON_OZONE_PLATFORM_HINT env var alone isn't guaranteed to be honored either.
-    waylandFlags = [ "--ozone-platform=wayland" ];
+    waylandFlags = [ "--ozone-platform=wayland" secretStoreFlag ];
   };
 
   signal = {
@@ -53,7 +74,7 @@
     categories = "Network;InstantMessaging;";
     mimeType = "x-scheme-handler/sgnl;x-scheme-handler/signalcaptcha;";
     # Confirmed does not read a flags file (signalapp/Signal-Desktop#5955).
-    waylandFlags = [ "--ozone-platform-hint=auto" "--use-tray-icon" ];
+    waylandFlags = [ "--ozone-platform-hint=auto" "--use-tray-icon" secretStoreFlag ];
   };
 
   element = {
@@ -69,7 +90,7 @@
     # ⚠ Element's native-Wayland mode has open, acknowledged upstream bugs (element-desktop#728:
     # transparent window at startup, white screen joining Jitsi calls). Enabling this is a real
     # tradeoff, not a guaranteed clean win — test after activating.
-    waylandFlags = [ "--ozone-platform=wayland" ];
+    waylandFlags = [ "--ozone-platform=wayland" secretStoreFlag ];
   };
 
   teams = {
@@ -91,6 +112,6 @@
     icon = "teams-for-linux";
     categories = "Network;Chat;InstantMessaging;Application;";
     mimeType = "x-scheme-handler/msteams;";
-    waylandFlags = [ ];
+    waylandFlags = [ secretStoreFlag ];
   };
 }
