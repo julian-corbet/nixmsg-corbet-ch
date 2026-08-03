@@ -103,20 +103,20 @@
     # No official Arch repo package. AUR "threema-desktop" builds an Electron wrapper FROM
     # SOURCE (matches nixpkgs' own threema-desktop attribute, AGPL-3.0 — confirmed via
     # `nix eval`, NOT the unfree proprietary blob a naive guess would expect). Flatpak
-    # ch.threema.threema-web-desktop is a separate, unofficial repackage of the proprietary
-    # vendor Electron binary — kept as an alternative channel specifically because an
-    # ALREADY-LINKED Threema Beta flatpak install may exist on a host (see
-    # ../experiments/README.md #2): swapping a live-linked Threema instance to a different build
-    # is a device-relink event, not a transparent package swap, so the consumer chooses the
-    # channel per host rather than this table forcing one.
+    # ch.threema.threema-desktop is a separate, unofficial repackage of the proprietary vendor
+    # Electron binary — kept as an alternative channel specifically because an ALREADY-LINKED
+    # Threema Beta flatpak install may exist on a host (confirmed live via `flatpak list`,
+    # 2026-08-03 — the real installed ID, corrected here from an earlier unverified guess of
+    # "ch.threema.threema-web-desktop"): swapping a live-linked Threema instance to a different
+    # build is a device-relink event, not a transparent package swap, so the consumer chooses
+    # the channel per host rather than this table forcing one.
     repo = null;
     aur = "threema-desktop";
     nixpkgs = "threema-desktop";
-    flatpak = "ch.threema.threema-web-desktop";
+    flatpak = "ch.threema.threema-desktop";
     # UNVERIFIED which of the aur/nixpkgs from-source build vs the flatpak repackage this
-    # actually matches — the two are different builds and may set different app-ids. See
-    # experiments/README.md #2.
-    appId = "ch.threema.threema-web-desktop";
+    # actually matches — the two are different builds and may set different app-ids.
+    appId = "ch.threema.threema-desktop";
   };
 
   whatsapp = {
