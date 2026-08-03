@@ -222,14 +222,20 @@ in
       lib.unique (map (a: a.name) (lib.filter (a: a.channel != "flatpak" && a.nixpkgs == null) resolved));
 
     nixmsg.appIds = lib.listToAttrs (map (a: lib.nameValuePair a.name a.appId) resolved);
-    nixmsg.pinnedAppIds = map (n: cfg.appIds.${n}) cfg.workspacePin.apps;
+    # A name in workspacePin.apps/autostart that isn't also enabled is caught by the assertions
+    # above with a clear message — these two just skip it rather than crash on a missing/null
+    # lookup, so that clear message is what actually surfaces instead of a raw eval error racing
+    # it (nothing guarantees assertions are forced before these are, under a bare `evalModules`).
+    nixmsg.pinnedAppIds = lib.filter (x: x != null) (map (n: cfg.appIds.${n} or null) cfg.workspacePin.apps);
 
     nixmsg.startupCommands =
-      map
-        (n:
-          let a = lib.findFirst (r: r.name == n) null resolved;
-          in if a.channel == "flatpak" then "flatpak run ${a.packageName}" else a.packageName
-        )
-        cfg.autostart;
+      lib.filter (x: x != null)
+        (map
+          (n:
+            let a = lib.findFirst (r: r.name == n) null resolved;
+            in if a == null then null
+               else if a.channel == "flatpak" then "flatpak run ${a.packageName}" else a.packageName
+          )
+          cfg.autostart);
   };
 }
