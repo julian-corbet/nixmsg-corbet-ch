@@ -12,6 +12,7 @@ directly), not a guess, but it is not the same claim as "this app runs correctly
 ## Table of contents
 
 001. Four of the seven catalogue apps turned out to be official Arch repo packages, not AUR-only as assumed going in
+002. `StartupWMClass` is the wrong field for a Wayland app-id, and produced two wrong catalogue values before this was caught
 
 ---
 
@@ -41,3 +42,37 @@ once it was clear these three were trivial zero-maintenance native installs alre
 
 **Status:** verified 2026-08-03 against live registries; re-check before citing if this file is
 read much later — package-repo status moves (as this same finding demonstrates).
+
+## 002 — `StartupWMClass` is the wrong field for a Wayland app-id
+
+**What was checked:** `lib/catalogue.nix`'s `appId` field was originally sourced from each app's
+`.desktop` file `StartupWMClass` key wherever a real `.desktop` file could be read. That key is
+defined by freedesktop.org's Desktop Entry spec as matching the X11 `WM_CLASS` property — it says
+nothing about a Wayland client's `xdg_toplevel` `app_id`, and nothing requires the two to be equal.
+
+**Finding:** they weren't equal, twice, in this table specifically. Telegram's shipped `.desktop`
+file declares `StartupWMClass=TelegramDesktop`, but the real running window (checked live via
+`scrollmsg -t get_tree` on a live Arch host, 2026-08-03) advertises app_id
+`"org.telegram.desktop"` — the desktop-file id, not the StartupWMClass string. ZapZap's shipped
+`.desktop` file declares `StartupWMClass=zapzap`, but its own upstream Python source
+(`zapzap/app/application.py`) explicitly calls
+`app.setDesktopFileName('com.rtosta.zapzap')` — a different string entirely, and the one
+`QGuiApplication`'s Wayland integration actually reads. Both wrong values had sat in the catalogue
+presented as settled.
+
+**What replaced it:** every entry was re-verified either live (`scrollmsg -t get_tree` against a
+real running window, preferred whenever available) or by reading the specific mechanism each
+toolkit actually uses — Qt/PyQt's `QGuiApplication::setDesktopFileName()`, Electron's
+`app.setDesktopName()` (called automatically by Electron's own bootstrap from `package.json`'s
+`desktopName` field, or overridable by the app's own code) — never StartupWMClass again. Two
+entries (Threema's aur/nixpkgs channel, Zoom) could not be settled by either method and are marked
+UNVERIFIED rather than left on a guess; see `../experiments/README.md` #002 and #005.
+
+**Why it mattered:** a wrong `appId` doesn't fail a build — `nixmsg.pinnedAppIds`/`appIds` feed
+straight into a compositor's window-rule syntax (nixscroll's `extraConfig`, niri's own
+`match app-id=`), and a wrong string there produces a rule that silently matches nothing. The
+failure is invisible until someone notices a workspace-pin or autostart placement never actually
+takes effect.
+
+**Status:** verified 2026-08-03, per-app method recorded in `lib/catalogue.nix`'s own header;
+6 of 8 entries settled, 2 explicitly open (see the experiments entries above).

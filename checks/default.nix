@@ -15,6 +15,16 @@
 # Flathub does NOT get added when nothing declared here needs it -- a suite that only checked the
 # first half would pass just as happily on a version that added every known remote unconditionally,
 # which is not the property this fix is actually for.
+#
+# A SECOND BUG THIS SUITE EXISTS TO CATCH: modules/home.nix and modules/nixmsg.nix both used to
+# resolve an autostart LAUNCH COMMAND from the catalogue's `repo`/`aur` PACKAGE name, silently
+# assuming a package name is also its binary's name on $PATH. Proven false live, 2026-08-03:
+# `pacman -Ql telegram-desktop` installs `/usr/bin/Telegram` (capital T), not
+# `/usr/bin/telegram-desktop` -- the old command built cleanly and failed at runtime with no
+# signal at eval time. The fixtures below pin telegram specifically (its catalogue entry's
+# `repo`/`binary` values are deliberately DIFFERENT strings) so a regression back to
+# `packageName`/`entry.repo` fails this suite immediately instead of waiting for another live
+# autostart to silently do nothing.
 { pkgs }:
 let
   lib = pkgs.lib;
@@ -45,6 +55,25 @@ let
 
   scriptOf = cfg: cfg.systemd.services.nixmsg-flatpak-install.script or "";
 
+  # Stub of the home-manager-only surface modules/home.nix writes to (`xdg.dataFile`/
+  # `xdg.configFile`) -- same opaque-attrs technique as systemSurfaceStub above, needed because
+  # home.nix is a home-manager module (a different option tree entirely from nixmsg.nix/
+  # flatpak-install.nix, which is why it gets its own eval helper rather than reusing evalMod).
+  homeSurfaceStub = { lib, ... }: {
+    options = {
+      xdg.dataFile = lib.mkOption { type = lib.types.attrsOf lib.types.attrs; default = { }; };
+      xdg.configFile = lib.mkOption { type = lib.types.attrsOf lib.types.attrs; default = { }; };
+    };
+  };
+
+  evalHomeMod = extraConfig: (lib.evalModules {
+    modules = [
+      homeSurfaceStub
+      ../modules/home.nix
+      extraConfig
+    ];
+  }).config;
+
   # ── Fixture 1: ONLY a non-Flathub app declared (threema, pinned to its flatpak channel -- its
   # auto-resolution default is "aur", so channel has to be named explicitly to exercise this path).
   cfgThreemaOnly = evalMod {
@@ -68,6 +97,22 @@ let
   # same contract `lib.mkIf (apps != [ ])` already promised for the old `ids` list.
   cfgNoFlatpak = evalMod {
     nixmsg.apps.discord = { enable = true; channel = "repo"; };
+  };
+
+  # ── Fixture 5: telegram autostart, system-plane (modules/nixmsg.nix) -- telegram's real
+  # catalogue entry deliberately has repo="telegram-desktop" and binary="Telegram", two DIFFERENT
+  # strings, so this fails loudly if startupCommands regresses to packageName/entry.repo.
+  cfgAutostartTelegramSystem = evalMod {
+    nixmsg.apps.telegram.enable = true;
+    nixmsg.autostart = [ "telegram" ];
+  };
+
+  # ── Fixture 6: telegram autostart, home-manager plane (modules/home.nix) -- same regression
+  # target, the actually-consumed launchCommand path (nixmsg.startupCommands above is never read
+  # by anything else in this repo, but is fixed and checked anyway rather than left as a second,
+  # unguarded copy of the same bug).
+  cfgAutostartTelegramHome = evalHomeMod {
+    nixmsg.home.autostart = [ "telegram" ];
   };
 
   results = [
@@ -130,6 +175,24 @@ let
     (check "no-flatpak-app/unit-absent"
       (!(cfgNoFlatpak.systemd.services ? "nixmsg-flatpak-install"))
       "systemd.services keys: ${builtins.toJSON (builtins.attrNames cfgNoFlatpak.systemd.services)}")
+
+    # ── autostart launch command uses the real binary, never the package name (system-plane) ──
+    (check "startupCommands/system-plane-uses-binary-not-package-name"
+      (cfgAutostartTelegramSystem.nixmsg.startupCommands == [ "Telegram" ])
+      "got: ${builtins.toJSON cfgAutostartTelegramSystem.nixmsg.startupCommands}")
+
+    (check "startupCommands/system-plane-does-not-fall-back-to-package-name"
+      (!(builtins.elem "telegram-desktop" cfgAutostartTelegramSystem.nixmsg.startupCommands))
+      "got: ${builtins.toJSON cfgAutostartTelegramSystem.nixmsg.startupCommands}")
+
+    # ── same property, home-manager plane -- the launchCommand path autostart actually uses ──
+    (check "startupCommands/home-plane-uses-binary-not-package-name"
+      (cfgAutostartTelegramHome.nixmsg.home.startupCommands == [ "Telegram" ])
+      "got: ${builtins.toJSON cfgAutostartTelegramHome.nixmsg.home.startupCommands}")
+
+    (check "startupCommands/home-plane-does-not-fall-back-to-package-name"
+      (!(builtins.elem "telegram-desktop" cfgAutostartTelegramHome.nixmsg.home.startupCommands))
+      "got: ${builtins.toJSON cfgAutostartTelegramHome.nixmsg.home.startupCommands}")
   ];
 
   failed = builtins.filter (r: !r.ok) results;
@@ -138,10 +201,11 @@ let
 
   eval-checks =
     if failed != [ ]
-    then throw ''
-      nixmsg eval-checks FAILED (${toString (builtins.length failed)}/${toString (builtins.length results)}):
-      ${report}
-    ''
+    then
+      throw ''
+        nixmsg eval-checks FAILED (${toString (builtins.length failed)}/${toString (builtins.length results)}):
+        ${report}
+      ''
     else
     # Depending on `passedCount` forces `results` (and every `check` assertion above), so the
     # checks genuinely run under `nix flake check` rather than merely being defined.

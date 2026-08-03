@@ -56,19 +56,17 @@ let
       in
       if requested == "flatpak" || (entry.repo == null && entry.aur == null) then
         "flatpak run ${entry.flatpak}"
-      else if requested == "aur" then
-        entry.aur
-      else if requested == "repo" then
-        entry.repo
-      # unset: same repo > aur priority the system-plane auto-resolution uses.
-      else if entry.repo != null then entry.repo
-      else entry.aur;
-  # Deliberately entry.repo/entry.aur here, NOT entry.nixpkgs — this is the Arch-platform
-  # binary name, and nixpkgs' attribute is a NixOS-ecosystem name that can legitimately differ
-  # from it. zoom is the proof: nixpkgs attribute `zoom-us`, but the actual installed binary
-  # (both the AUR package and the Flathub build agree) is `zoom` — using entry.nixpkgs here
-  # would launch a binary that doesn't exist on an Arch host. entry.repo/entry.aur happen to
-  # equal entry.nixpkgs for every other catalogue entry, so this changes nothing for them.
+      else
+        entry.binary;
+  # entry.binary, NEVER entry.repo/entry.aur (the PACKAGE name) or entry.nixpkgs (a
+  # NixOS-ecosystem name that can legitimately differ from either). Proven live that package name
+  # and binary name diverge: `pacman -Ql telegram-desktop` installs `/usr/bin/Telegram` (capital
+  # T), and `type -a telegram-desktop` finds nothing on $PATH at all — threema-desktop's AUR
+  # package repeats the same mistake even more sharply, installing `/usr/bin/threema`. See
+  # lib/catalogue.nix's own `binary` field comment for the per-app verification. Every catalogue
+  # entry currently populates AT MOST one of repo/aur (never both), so `binary` doesn't need to
+  # vary by requested channel the way `packageName` does — a future entry populating both with
+  # genuinely different binaries would need this to become per-channel.
 
   mkDesktopFileText = name:
     let

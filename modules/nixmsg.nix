@@ -66,7 +66,7 @@ let
         else null;
       channel = if requested != null then requested else auto;
       channelValue = { repo = entry.repo; aur = entry.aur; flatpak = entry.flatpak; }.${
-        if channel == null then "repo" else channel
+      if channel == null then "repo" else channel
       };
     in
     assert lib.assertMsg (channel != null)
@@ -252,13 +252,17 @@ in
     # it (nothing guarantees assertions are forced before these are, under a bare `evalModules`).
     nixmsg.pinnedAppIds = lib.filter (x: x != null) (map (n: cfg.appIds.${n} or null) cfg.workspacePin.apps);
 
+    # a.binary, NEVER a.packageName, for the non-flatpak branch — a.packageName is the PACKAGE
+    # name (repo/aur), not necessarily the executable name; see lib/catalogue.nix's own `binary`
+    # field comment and modules/home.nix's identical fix (telegram: package "telegram-desktop",
+    # real binary "Telegram") for the live proof this mirrors.
     nixmsg.startupCommands =
       lib.filter (x: x != null)
         (map
           (n:
             let a = lib.findFirst (r: r.name == n) null resolved;
             in if a == null then null
-               else if a.channel == "flatpak" then "flatpak run ${a.packageName}" else a.packageName
+            else if a.channel == "flatpak" then "flatpak run ${a.packageName}" else a.binary
           )
           cfg.autostart);
   };

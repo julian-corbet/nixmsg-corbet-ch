@@ -2,7 +2,8 @@
 
 Throwaway trials and the open-questions ledger — every entry below is a default, an inference, or
 a "not yet" in `lib/catalogue.nix` or the modules that is reasoned, not measured against a real
-running instance of the app. Results feed back into the catalogue as they close.
+running instance of the app. Results feed back into the catalogue as they close; a fully-closed
+question moves out of this file into `../studies/README.md` instead of lingering here answered.
 
 `validate-nixpkgs-names.nix` is the one exception that's a real, runnable check rather than a
 question: `nix-instantiate --eval --strict experiments/validate-nixpkgs-names.nix -A missing`
@@ -13,37 +14,41 @@ that distinction mattered for real this time (`pkgs.zoom` resolves, and is not Z
 
 ## Table of contents
 
-001. Three catalogue entries' Wayland app-ids (teams, threema, whatsapp) are inferred from the desktop-file/Flatpak-id naming convention, not observed on a running window
-002. Threema's AUR/nixpkgs from-source build and its Flatpak repackage may not share the same app-id
+002. Threema's aur/nixpkgs from-source build does not share the Flatpak repackage's app-id — confirmed different builds, the aur/nixpkgs side's real value is still open
 003. `flatpak-install.nix` assumes `--system` scope is right for every consumer; untested against a `--user`-only host
 004. The channel auto-resolution order (repo > aur > flatpak) has never been exercised against a host with `aurUser` unset
+005. Zoom's Wayland app-id could not be settled by either live or source verification
 
 ---
 
-## 001 — Three app-ids are inferred, not observed
+## 002 — Threema's two builds do not share an app-id
 
-**Question:** `discord`/`telegram`/`signal`/`element`'s `appId` values were corroborated against
-upstream source or established compositor window-rule examples. `teams`, `threema`, and
-`whatsapp`'s were not — they're inferred from the .desktop-file-basename-equals-app-id convention
-(true for most well-behaved Electron/Flatpak apps, not guaranteed for every Qt/QtWebEngine
-wrapper).
+**Question:** `lib/catalogue.nix`'s `threema` entry gives one `appId` for two independently-built
+packages of different provenance — does the from-source AUR/nixpkgs build (`threema-desktop`, the
+DEFAULT channel since threema has no `repo` entry) set the same Wayland app_id as the Flatpak
+repackage of Threema GmbH's own proprietary binary?
 
-**Method:** once each app is actually installed, `niri msg windows` (or the scroll/sway
-equivalent) against a running instance settles it directly.
+**What's settled:** the two are confirmed to be genuinely different codebases, not just different
+builds of the same one. The Flatpak build's app_id is LIVE-verified: launched on a live Arch host
+(2026-08-03), where it's already linked and in daily use, `scrollmsg -t get_tree` reports app_id
+`"Threema"`. The AUR/nixpkgs build is `threema-ch/threema-web-electron` (internal package name
+`threema-consumer-web`), launched through the system's `electron37` package rather than a bundled
+one — an older major version than the Electron 42.5.0 that settled `teams`'s entry in the same
+catalogue, so that fallback-inference chain can't be assumed to carry over. Its source sets
+neither `package.json`'s `desktopName` field nor calls `app.setDesktopName()` anywhere; it only
+bakes a `StartupWMClass` into the generated `.deb`'s desktop file at package time
+(`tools/packaging/package-deb.js`) — exactly the X11-only mechanism `lib/catalogue.nix`'s header
+now explains is unsound for Wayland.
+
+**Still open:** the AUR/nixpkgs build's real app_id. Not installed on any host checked so far;
+`lib/catalogue.nix`'s `appId` field holds the Flatpak's confirmed value only, with an explicit
+note that it should not be assumed to also cover this channel.
+
+**Method:** install the AUR or nixpkgs build somewhere and check directly (`scrollmsg -t
+get_tree` / `niri msg windows`), or read `electron37`'s own default-app_id fallback source (the
+same technique that settled `teams`) if a live check isn't available first.
 
 **Status:** open.
-
-## 002 — Threema's two builds may not share an app-id
-
-**Question:** `lib/catalogue.nix`'s `threema` entry gives both `aur`/`nixpkgs` (a from-source
-Electron build) and `flatpak` (an unofficial repackage of Threema's own proprietary binary) the
-same `appId`. These are two independently-built packages of different provenance; nothing confirms
-they set the same `StartupWMClass`.
-
-**Method:** compare directly once both are installed somewhere, or accept per-channel
-`appId` divergence in the schema if it turns out to matter for a workspace-pin rule.
-
-**Status:** open, and moot for any host that only ever runs one channel of the two.
 
 ## 003 — `--system` Flatpak scope is asserted, not tested against every shape
 
@@ -70,3 +75,27 @@ warning text. Left as nixarch's problem to signal, matching how nixdev handles t
 situation for its own AUR-channel tools.
 
 **Status:** open, low-severity (a loud warning already exists, just not from this repo).
+
+## 005 — Zoom's Wayland app-id could not be settled
+
+**Question:** what does the real Zoom client (either channel — AUR vendor repackage, or the
+Flathub build) set as its Wayland app_id?
+
+**What was tried:** live — installed the Flathub build (`us.zoom.Zoom`) fresh on a live Arch host
+(2026-08-03) and ran it; no window was ever mapped in `scrollmsg -t get_tree` after ~30s (no
+crash, no error beyond a harmless D-Bus warning). The app and its two pulled-in runtimes were
+removed again afterward. Source — the AUR package is a literal `cp -dpr` of Zoom's own vendor
+tree; no source exists to read. The vendor binary does link the
+`QGuiApplication::setDesktopFileName` symbol, but is stripped, so nothing confirms whether Zoom's
+own code calls it, or with what string.
+
+**Current state:** `lib/catalogue.nix`'s `zoom.appId` is `"zoom"`, the `StartupWMClass` value —
+kept as the best available placeholder, explicitly flagged there as unverified rather than
+settled (this is the same field this catalogue's header explains is the wrong one to trust for a
+Wayland app_id).
+
+**Method:** get Zoom running long enough on a real Wayland session to map a window (interactively,
+past whatever first-run/update step blocked the unattended launch attempted here) and check
+directly.
+
+**Status:** open.

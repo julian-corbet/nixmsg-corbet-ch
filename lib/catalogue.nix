@@ -51,21 +51,106 @@
 # the sharp example — top-level `pkgs.zoom` resolves cleanly to a wrong, unrelated package (the
 # real one is `pkgs.zoom-us`), the same trap class as `pkgs.ark` being a Jupyter R kernel rather
 # than the KDE archiver. A wrong-but-resolving attribute is worse than a missing one: it builds.
+# VERIFY THE VERSION TOO IF AN ENTRY MAKES A CLAIM ABOUT IT: nixpkgs' pin moves independently of
+# any specific upstream tag, and citing "the exact version X builds" goes stale the moment either
+# side updates — see zapzap's own comment below for a claim of this shape that was wrong, and how
+# it's stated now instead.
 #
-# `appId` is the Wayland/X11 app-id (StartupWMClass) the running window advertises — what a
-# compositor's window-rule (`app-id="..."` in scroll/sway, `match app-id=` in niri) actually
-# matches against. This is deliberately NOT always the same string as the flatpak id or the
-# .desktop basename — Telegram is the sharpest example (desktop-file id `org.telegram.desktop`,
-# but the StartupWMClass a compositor sees is `TelegramDesktop`), and getting this wrong produces
-# a window-rule that silently matches nothing, not an error.
+# `binary` is the actual executable name pacman puts on $PATH for the repo/aur channel — NOT
+# necessarily the package name, and modules/home.nix used to assume they were identical (feeding
+# `entry.repo`/`entry.aur` straight into a shell command as if a package name were also its
+# binary). Proven wrong live: `pacman -Ql telegram-desktop | grep /usr/bin/` installs
+# `/usr/bin/Telegram` (capital T), and `type -a telegram-desktop` finds nothing on $PATH at all —
+# the old launch command was a string that built cleanly and failed silently at runtime.
+# Threema's AUR package repeats the same mistake even more sharply: package `threema-desktop`,
+# binary `/usr/bin/threema` (see that entry's own comment). Verified against
+# `pacman -Ql <pkg> | grep /usr/bin/` on a live Arch host for the five entries actually installed
+# there (discord, telegram-desktop, signal-desktop, element-desktop, teams-for-linux); the other
+# three (threema-desktop, zapzap, zoom) aren't installed on that host, so their `binary` value
+# comes from reading the AUR package's own `package()` step / upstream packaging config instead —
+# see each entry's own comment for which. Only meaningful for the repo/aur channels: the flatpak
+# channel never launches by executable name, always `flatpak run <flatpak id>`. Every entry below
+# currently populates AT MOST one of repo/aur, never both, so one `binary` field is enough to
+# cover whichever channel actually exists — if a future entry ever populates both with genuinely
+# different binaries, this single field stops being sufficient and needs to become per-channel.
 #
-# WHAT WAS VERIFIED, AND HOW SURE. Six entries (discord, telegram, signal, element, whatsapp,
-# zoom) had their app-id independently corroborated from upstream source, a well-established
-# compositor window-rule example, or (whatsapp, zoom) a real `.desktop` file read directly out of
-# the actual upstream/vendor package — see each entry's own comment for which. Two (teams,
-# threema) rest on inference from the .desktop-file naming convention only — flagged per-entry
-# below, and in `../experiments/README.md`. Treat those two as "verify once installed"
-# (`niri msg windows` / a scroll equivalent), not as settled.
+# `appId` is the Wayland app-id the running window's `xdg_toplevel` surface actually advertises —
+# what a compositor's window-rule (`app-id="..."` in scroll/sway, `match app-id=` in niri) matches
+# against.
+#
+# STARTUPWMCLASS IS THE WRONG FIELD TO READ FOR THIS, AND WAS THIS TABLE'S ORIGINAL SIN. A
+# `.desktop` file's `StartupWMClass` is an X11 concept — freedesktop.org's Desktop Entry spec
+# defines it as "should be equal to the string WM_CLASS property [...] of the application's main
+# window". It says nothing about a Wayland client's `xdg_toplevel` `app_id`, and nothing REQUIRES
+# the two to match. Each toolkit sets its Wayland app_id through its own, separate mechanism, none
+# of which reads StartupWMClass: Qt/PyQt from `QGuiApplication::setDesktopFileName()` (zapzap;
+# Threema's builds, unverified — see below); Electron from `app.setDesktopName()`, which Electron's
+# OWN bootstrap (`lib/browser/init.ts`) calls automatically with `package.json`'s `desktopName`
+# field if present, else a computed slug of the app's name — and which the app's own code can call
+# again later to override that default (discord/signal/element/teams-for-linux, all Electron; see
+# each entry below for which path applies). Proven wrong live, on this exact table's first draft:
+# Telegram's `.desktop` file declares `StartupWMClass=TelegramDesktop`, but `scrollmsg -t get_tree`
+# against the REAL running window (a live Arch host, 2026-08-03) reports `app_id:
+# "org.telegram.desktop"` — the desktop-file id, not the StartupWMClass string. Reading
+# StartupWMClass produces a window-rule that silently matches nothing on Wayland, not an error.
+#
+# WHAT WAS VERIFIED, AND HOW, PER APP (2026-08-03, re-verified end to end after the
+# StartupWMClass mistake above was found — see `../experiments/README.md` #002 (threema) and #005
+# (zoom) for what's still genuinely open):
+#
+#   discord   LIVE — launched on a live Arch host, `scrollmsg -t get_tree`: app_id "discord".
+#   telegram  LIVE — was already running on a live Arch host, `scrollmsg -t get_tree`: app_id
+#             "org.telegram.desktop". Previously wrong: "TelegramDesktop" (StartupWMClass).
+#   signal    SOURCE — the shipped app.asar's own `package.json` carries `"desktopName":
+#             "signal.desktop"`, read directly out of the real
+#             `/usr/lib/signal-desktop/resources/app.asar` on a live Arch host; Electron's
+#             bootstrap uses this value literally (minus the `.desktop` suffix) as the app_id.
+#             Live attempt aborted: signal-desktop's local DB failed to decrypt against this
+#             host's current keyring backend (an unrelated, in-flight issue) and it crashed
+#             before ever mapping a window.
+#   element   SOURCE — the shipped app.asar's own JS explicitly calls
+#             `app.setDesktopName("Element")`, read directly out of the real
+#             `/usr/lib/element/app.asar` on a live Arch host, with the developers' own comment
+#             attached: "Set the desktop name explicitly to ensure correct WM_CLASS and Wayland
+#             app_id when running with a system Electron binary."
+#   teams     SOURCE, derived rather than captured — teams-for-linux only calls
+#             `app.setDesktopName()` when an operator explicitly sets the non-default `class`
+#             config key (default: `null`); its shipped `package.json` has neither `desktopName`
+#             nor `productName`, so Electron's own bootstrap falls back to slugifying `name`
+#             ("teams-for-linux", already a valid slug) — confirmed against the exact Electron
+#             version this package ships, 42.5.0 (`teams-for-linux --version`), well past the
+#             41.6.1 backport this specific fallback needs. NOT the Flatpak id this table
+#             previously guessed by naming convention. Live attempt made: the app starts fully
+#             into the system tray with no window ever mapped (26s waited), so this rests on the
+#             derivation above, not a capture.
+#   threema   SPLIT — the two channels are confirmed to be different builds and do not share an
+#             app_id. flatpak (`ch.threema.threema-desktop`, Threema GmbH's own official build):
+#             LIVE — launched on a live Arch host, where it is already linked and in daily use,
+#             `scrollmsg -t get_tree`: app_id "Threema". aur/nixpkgs (`threema-desktop` — the
+#             DEFAULT channel, since threema has no `repo` entry): UNVERIFIED. Its own AUR
+#             PKGBUILD shows a from-source Electron build of a genuinely different upstream
+#             project (threema-ch/threema-web-electron, package name "threema-consumer-web"
+#             internally) launched through the system's `electron37` package rather than a
+#             bundled one — an older major version than teams-for-linux's, so the fallback logic
+#             above cannot be assumed to apply the same way — and the source sets neither
+#             `desktopName` nor calls `setDesktopName()` anywhere. See
+#             `../experiments/README.md` #002.
+#   zapzap    SOURCE — upstream's own `zapzap/app/application.py` calls
+#             `app.setDesktopFileName(zapzap.__desktopid__)`, where `zapzap/__init__.py` sets
+#             `__desktopid__ = 'com.rtosta.zapzap'` — read directly out of upstream source,
+#             confirmed unchanged from tag 6.5.2.5 through the current 7.2. NOT "zapzap": that's
+#             `StartupWMClass=zapzap` in the same shipped `.desktop` file, exactly the field this
+#             header explains is wrong for Wayland.
+#   zoom      UNVERIFIED — neither method settled it. Live: installed the Flathub build fresh on
+#             a live Arch host (`flatpak install`/`flatpak run us.zoom.Zoom`) — no window ever
+#             mapped in ~30s (no crash, no error beyond a harmless D-Bus warning); the app and
+#             its two pulled-in runtimes were removed again afterward, leaving no trace. Source:
+#             the AUR package is a literal `cp -dpr` of Zoom's own proprietary vendor tree — no
+#             source exists to read. The vendor binary does link the
+#             `QGuiApplication::setDesktopFileName` symbol, but is stripped, so nothing confirms
+#             whether Zoom's own code calls it, or with what string. `StartupWMClass=zoom`, read
+#             from two independent shipped `.desktop` files, is kept below as the best available
+#             placeholder — no longer claimed as settled.
 #
 # EVERY `flatpak` ID BELOW WAS CHECKED AGAINST A LIVE FLATHUB, not assumed — seven resolve there
 # (discord, telegram, signal, element, teams, whatsapp, zoom; confirmed via `flatpak remote-ls
@@ -82,10 +167,13 @@
     # release channels, deliberately NOT the default here (this table names the stable app).
     repo = "discord";
     aur = null;
+    # pacman -Ql discord | grep /usr/bin/ -> /usr/bin/discord, confirmed on a live Arch host.
+    binary = "discord";
     nixpkgs = "discord";
     flatpak = "com.discordapp.Discord";
     # Confirmed live against `flatpak remote-ls flathub`, 2026-08-03 — genuinely on Flathub.
     flatpakRemote = null;
+    # LIVE — launched on a live Arch host (2026-08-03), scrollmsg -t get_tree: app_id "discord".
     appId = "discord";
   };
 
@@ -93,13 +181,19 @@
     # extra/telegram-desktop, confirmed 2026-08-03. No AUR needed.
     repo = "telegram-desktop";
     aur = null;
+    # NOT "telegram-desktop" — pacman -Ql telegram-desktop | grep /usr/bin/ -> /usr/bin/Telegram
+    # (capital T), confirmed on a live Arch host. `type -a telegram-desktop` finds nothing on
+    # $PATH at all; the old launch command (package name reused as the binary) built cleanly and
+    # failed silently at runtime. See the header's own `binary` paragraph.
+    binary = "Telegram";
     nixpkgs = "telegram-desktop";
     flatpak = "org.telegram.desktop";
     # Confirmed live against `flatpak remote-ls flathub`, 2026-08-03 — genuinely on Flathub.
     flatpakRemote = null;
-    # NOT "org.telegram.desktop" (that's the .desktop/flatpak id). StartupWMClass is
-    # "TelegramDesktop", verified against upstream tdesktop's own lib/xdg/*.desktop source.
-    appId = "TelegramDesktop";
+    # LIVE, and the proof cited in the header above: was already running on a live Arch host,
+    # scrollmsg -t get_tree: app_id "org.telegram.desktop" (the desktop-file id) — NOT
+    # "TelegramDesktop" (that's StartupWMClass, the wrong X11-only field; see the header).
+    appId = "org.telegram.desktop";
   };
 
   signal = {
@@ -107,10 +201,21 @@
     # time anyone checked this by hand; do not assume AUR-only without re-checking.
     repo = "signal-desktop";
     aur = null;
+    # pacman -Ql signal-desktop | grep /usr/bin/ -> /usr/bin/signal-desktop, confirmed on
+    # a live Arch host — matches the package name here, but see telegram's own comment for why
+    # that can never be assumed without checking.
+    binary = "signal-desktop";
     nixpkgs = "signal-desktop";
     flatpak = "org.signal.Signal";
     # Confirmed live against `flatpak remote-ls flathub`, 2026-08-03 — genuinely on Flathub.
     flatpakRemote = null;
+    # SOURCE — the shipped app.asar's own package.json carries `"desktopName": "signal.desktop"`
+    # (read directly out of /usr/lib/signal-desktop/resources/app.asar on a live Arch host);
+    # Electron's own bootstrap (lib/browser/init.ts) calls
+    # `app.setDesktopName(packageJson.desktopName || ...)` with this value automatically, and the
+    # Wayland app_id is this string with the .desktop suffix stripped. Live attempt aborted:
+    # signal-desktop's local DB failed to decrypt against this host's current keyring backend (an
+    # unrelated, in-flight issue) and it crashed before ever mapping a window.
     appId = "signal";
   };
 
@@ -120,12 +225,19 @@
     # extra ever lags, deliberately not the default while extra is current.
     repo = "element-desktop";
     aur = null;
+    # pacman -Ql element-desktop | grep /usr/bin/ -> /usr/bin/element-desktop, confirmed on
+    # a live Arch host.
+    binary = "element-desktop";
     nixpkgs = "element-desktop";
     # Legacy Riot naming retained upstream for compatibility.
     flatpak = "im.riot.Riot";
     # Confirmed live against `flatpak remote-ls flathub`, 2026-08-03 — genuinely on Flathub
     # (Flathub kept the legacy id too, not just upstream).
     flatpakRemote = null;
+    # SOURCE — the shipped app.asar's own JS explicitly calls `app.setDesktopName("Element")`
+    # (read directly out of /usr/lib/element/app.asar on a live Arch host), with the developers'
+    # own comment attached to the call: "Set the desktop name explicitly to ensure correct
+    # WM_CLASS and Wayland app_id when running with a system Electron binary."
     appId = "Element";
   };
 
@@ -137,13 +249,20 @@
     # changes the Teams web app in ways its injected scripts depend on.
     repo = null;
     aur = "teams-for-linux";
+    # pacman -Ql teams-for-linux | grep /usr/bin/ -> /usr/bin/teams-for-linux, confirmed on
+    # a live Arch host.
+    binary = "teams-for-linux";
     nixpkgs = "teams-for-linux";
     flatpak = "com.github.IsmaelMartinez.teams_for_linux";
     # Confirmed live against `flatpak remote-ls flathub`, 2026-08-03 — genuinely on Flathub.
     flatpakRemote = null;
-    # Inferred from the .desktop basename / Flatpak-id convention, NOT independently confirmed
-    # against a running window — see experiments/README.md #1.
-    appId = "com.github.IsmaelMartinez.teams_for_linux";
+    # SOURCE, derived rather than captured live — see the header for the full chain. In short:
+    # teams-for-linux only calls `app.setDesktopName()` when an operator sets the non-default
+    # `class` config key (default null); absent that, Electron's own bootstrap slugifies
+    # package.json's `name` field ("teams-for-linux", already a valid slug) — confirmed against
+    # this package's actual shipped Electron version, 42.5.0. NOT the Flatpak id this table
+    # previously guessed by naming convention.
+    appId = "teams-for-linux";
   };
 
   threema = {
@@ -159,6 +278,12 @@
     # the channel per host rather than this table forcing one.
     repo = null;
     aur = "threema-desktop";
+    # NOT "threema-desktop" — the AUR PKGBUILD's own package() step installs to
+    # "${pkgdir}/usr/bin/${_binname}" with _binname=threema, i.e. /usr/bin/threema (confirmed by
+    # reading the PKGBUILD directly; this channel isn't installed on a live Arch host to also
+    # check with pacman -Ql). A second, sharper instance of exactly telegram's mistake — see the
+    # header's `binary` paragraph.
+    binary = "threema";
     nixpkgs = "threema-desktop";
     flatpak = "ch.threema.threema-desktop";
     # NOT ON FLATHUB — confirmed live, 2026-08-03: `flatpak remote-ls flathub` has no
@@ -171,9 +296,16 @@
       name = "threema-desktop";
       url = "https://releases.threema.ch/flatpak/threema-desktop/";
     };
-    # UNVERIFIED which of the aur/nixpkgs from-source build vs the flatpak repackage this
-    # actually matches — the two are different builds and may set different app-ids.
-    appId = "ch.threema.threema-desktop";
+    # SPLIT, confirmed rather than merely suspected now — see the header and
+    # ../experiments/README.md #002. The flatpak build's app_id is LIVE-verified "Threema":
+    # launched on a live Arch host, where it is already linked and in daily use, scrollmsg -t
+    # get_tree: app_id "Threema". The aur/nixpkgs build — the one this table's DEFAULT channel
+    # actually resolves to, since threema has no `repo` — is a genuinely different codebase
+    # (threema-ch/threema-web-electron, launched through the system's older `electron37`, not a
+    # bundled Electron) whose source sets neither `desktopName` nor calls `setDesktopName()`
+    # anywhere: UNVERIFIED. This field holds the one confirmed value; do not assume it also
+    # matches the aur/nixpkgs channel's real window.
+    appId = "Threema";
   };
 
   whatsapp = {
@@ -196,15 +328,28 @@
     # AUR build over a prebuilt alternative.)
     repo = null;
     aur = "zapzap";
+    # pyproject.toml's own [project.scripts] entry point: `zapzap = "zapzap.__main__:main"` — read
+    # directly out of upstream source (tag 7.2), matching the AUR PKGBUILD's wheel install and the
+    # pkgname itself; not installed on a live Arch host to also check with pacman -Ql.
+    binary = "zapzap";
     nixpkgs = "zapzap";
     flatpak = "com.rtosta.zapzap";
     # Confirmed live against `flatpak remote-info flathub com.rtosta.zapzap`, 2026-08-03 —
     # genuinely on Flathub.
     flatpakRemote = null;
-    # VERIFIED, not inferred — read directly out of upstream's own
-    # share/applications/com.rtosta.zapzap.desktop at tag 6.5.2.5 (github.com/rafatosta/zapzap),
-    # the exact version nixpkgs' own `zapzap` attribute builds: `StartupWMClass=zapzap`.
-    appId = "zapzap";
+    # SOURCE — upstream's own zapzap/app/application.py calls
+    # `app.setDesktopFileName(zapzap.__desktopid__)`, where zapzap/__init__.py sets
+    # `__desktopid__ = 'com.rtosta.zapzap'` — read directly out of upstream source, confirmed
+    # unchanged from tag 6.5.2.5 through the current 7.2. NOT "zapzap": that's
+    # `StartupWMClass=zapzap` in the same shipped .desktop file — exactly the field the header
+    # above explains is wrong for Wayland. nixpkgs' own `zapzap` attribute does NOT build
+    # 6.5.2.5 (a since-corrected claim this entry used to make): infra's pinned nixpkgs builds
+    # zapzap-6.2.4 (`nix eval --raw <infra's nixpkgs flake ref>#zapzap.name`, 2026-08-03) —
+    # nixpkgs tracks its own point in zapzap's history, not any specific upstream tag, and that
+    # point moves independent of this table. The app_id claim above does not depend on which
+    # version is actually pinned: setDesktopFileName's argument hasn't changed across the tags
+    # checked here.
+    appId = "com.rtosta.zapzap";
   };
 
   zoom = {
@@ -215,6 +360,11 @@
     # step is a literal `cp -dpr` of the downloaded vendor tree, confirmed by reading it.
     repo = null;
     aur = "zoom";
+    # /usr/bin/zoom is a symlink to /opt/zoom/ZoomLauncher inside the vendor tree the AUR
+    # package's package() step copies verbatim — confirmed by extracting the real vendor package
+    # and reading it directly; this channel isn't installed via pacman on a live Arch host to
+    # also check with pacman -Ql.
+    binary = "zoom";
     # NOT `pkgs.zoom` — that resolves cleanly to an unrelated package, the same trap class as
     # `pkgs.ark` being a Jupyter R kernel rather than the KDE archiver. The real attribute is
     # `zoom-us`. Confirmed 2026-08-03:
@@ -227,12 +377,14 @@
     # Flathub (version 7.1.5.4332 there, a few weeks ahead of the AUR package's 7.1.5-1 but the
     # same 7.1.5 line — nothing here suggests channel divergence worth tracking).
     flatpakRemote = null;
-    # VERIFIED, not inferred — read directly out of the real vendor `.desktop` file, two
-    # independent ways that agree: (1) the AUR package's own vendor tarball, downloaded and
-    # extracted at usr/share/applications/Zoom.desktop, declares `StartupWMClass=zoom`; (2)
-    # Flathub's own us.zoom.Zoom.desktop (github.com/flathub/us.zoom.Zoom) independently declares
-    # the identical `StartupWMClass=zoom`. Both channels' actual shipped desktop files were read,
-    # not assumed from a naming convention.
+    # UNVERIFIED — neither method settled it; see the header. `StartupWMClass=zoom`, read from
+    # two independent shipped .desktop files, is kept here as the best available placeholder —
+    # it is exactly the X11-only field the header explains is unsound for Wayland, not a
+    # confirmed value. Live: installed the Flathub build fresh on a live Arch host and ran it —
+    # no window ever mapped in ~30s; the app and its two pulled-in runtimes were removed again
+    # afterward. Source: the vendor binary is proprietary and stripped; it links the
+    # QGuiApplication::setDesktopFileName symbol, but nothing confirms whether Zoom's own code
+    # calls it, or with what string.
     appId = "zoom";
   };
 }
