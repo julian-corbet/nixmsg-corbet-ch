@@ -10,7 +10,7 @@
 # both lists to the same values; this module does not invent cross-plane machinery to avoid that
 # one line of duplication.
 #
-# WHY A .desktop OVERRIDE MECHANISM EXISTS AT ALL. Verified live (a live Arch host, 2026-08-03),
+# WHY A .desktop OVERRIDE MECHANISM EXISTS AT ALL. Verified live on a CachyOS laptop (2026-08-03),
 # not assumed: three of the four Electron apps in this catalogue (Discord, Signal, Element) do not
 # reliably pick up native Wayland rendering or an `ELECTRON_OZONE_PLATFORM_HINT` env var — Discord
 # specifically bundles its own (often lagging) Electron via a bootstrap wrapper script with no

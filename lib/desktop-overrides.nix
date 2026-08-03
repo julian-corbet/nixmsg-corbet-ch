@@ -1,6 +1,6 @@
 #
 # Per-app `.desktop` override data — ONLY for apps that need one. Real upstream desktop-entry
-# content, read directly off a live host (a live Arch host, 2026-08-03), not guessed. Every field
+# content, read directly off a live host (a CachyOS laptop, 2026-08-03), not guessed. Every field
 # here was copied from the actual installed `/usr/share/applications/<file>` — see the comment on
 # each entry for exactly which file.
 #
