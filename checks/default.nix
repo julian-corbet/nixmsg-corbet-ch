@@ -1,20 +1,24 @@
 # checks/default.nix
 #
-# EVAL-TIME checks for modules/nixmsg.nix's `flatpakApps` output and modules/flatpak-install.nix's
-# rendering of it -- the same `lib.evalModules` + stubbed option-surface technique nixarch's own
-# checks/default.nix uses (see that file's own header): no real NixOS/system-manager evaluation,
-# because what is under test is only what these two files RENDER (an option value, a systemd unit
-# script), never whether `flatpak` on a real host actually converges.
+# EVAL-TIME checks for what modules/nixmsg.nix RENDERS -- the same `lib.evalModules` + stubbed
+# option-surface technique nixarch's own checks/default.nix uses (see that file's own header): no
+# real NixOS/system-manager evaluation, because what is under test is an option value, never
+# whether a real host actually converges to it.
 #
-# THE BUG THIS SUITE EXISTS TO CATCH, PERMANENTLY. An earlier version of flatpak-install.nix
-# hardcoded Flathub as the only remote it would ever `remote-add` or install from. Threema's
-# catalogue entry (../lib/catalogue.nix) names `ch.threema.threema-desktop`, which does not exist
-# on Flathub at all (confirmed live, 2026-08-03 -- see that file's own header); the real desktop
-# client is only ever distributed from Threema GmbH's own repo. Every fixture below that involves
-# threema proves BOTH directions: the right remote gets `remote-add`'d and installed from, AND
-# Flathub does NOT get added when nothing declared here needs it -- a suite that only checked the
-# first half would pass just as happily on a version that added every known remote unconditionally,
-# which is not the property this fix is actually for.
+# WHERE THE INSTALLER'S OWN TESTS WENT. This suite used to also evaluate modules/flatpak-install.nix
+# and assert on the `flatpak remote-add`/`install` lines it rendered. That file is nixflat's now,
+# and so are those assertions -- nixflat's own checks/default.nix carries them, extended with the
+# dedup and conflict cases that only exist once more than one catalogue feeds the same installer.
+# Duplicating them here would test nixflat through nixmsg, which is exactly the per-catalogue
+# duplication the extraction removed.
+#
+# WHAT REMAINS THIS REPO'S TO PROVE is the CONTRACT it hands nixflat: `flatpakApps` carrying id and
+# remote TOGETHER, one remote resolved per APP rather than once per host. Threema's catalogue entry
+# (../lib/catalogue.nix) names `ch.threema.threema-desktop`, which does not exist on Flathub at all
+# (confirmed live, 2026-08-03 -- see that file's own header); the real desktop client is only ever
+# distributed from Threema GmbH's own repo. That is the fact the per-app shape exists for, and the
+# threema fixtures below are what keep a future "just default everything to Flathub" simplification
+# from passing.
 #
 # A SECOND BUG THIS SUITE EXISTS TO CATCH: modules/home.nix and modules/nixmsg.nix both used to
 # resolve an autostart LAUNCH COMMAND from the catalogue's `repo`/`aur` PACKAGE name, silently
@@ -46,19 +50,16 @@ let
       systemSurfaceStub
       { _module.args.pkgs = pkgs; }
       ../modules/nixmsg.nix
-      ../modules/flatpak-install.nix
       extraConfig
     ];
   }).config;
 
   check = name: ok: detail: { inherit name ok detail; };
 
-  scriptOf = cfg: cfg.systemd.services.nixmsg-flatpak-install.script or "";
-
   # Stub of the home-manager-only surface modules/home.nix writes to (`xdg.dataFile`/
   # `xdg.configFile`) -- same opaque-attrs technique as systemSurfaceStub above, needed because
-  # home.nix is a home-manager module (a different option tree entirely from nixmsg.nix/
-  # flatpak-install.nix, which is why it gets its own eval helper rather than reusing evalMod).
+  # home.nix is a home-manager module (a different option tree entirely from nixmsg.nix, which is
+  # why it gets its own eval helper rather than reusing evalMod).
   homeSurfaceStub = { lib, ... }: {
     options = {
       xdg.dataFile = lib.mkOption { type = lib.types.attrsOf lib.types.attrs; default = { }; };
@@ -158,52 +159,25 @@ let
       ])
       "got: ${builtins.toJSON cfgFlathubOnly.nixmsg.flatpakApps}")
 
-    # ── threema-only: adds threema's remote, and ONLY threema's remote ──
-    (check "script/threema-only-adds-threema-remote"
-      (lib.hasInfix "flatpak remote-add --system --if-not-exists threema-desktop https://releases.threema.ch/flatpak/threema-desktop/" (scriptOf cfgThreemaOnly))
-      "script: ${scriptOf cfgThreemaOnly}")
+    # ── mixed selection: each app still carries ITS OWN remote, never the other's ──
+    # The crossed-remote failure is nixflat's to prevent at install time, and its own suite proves
+    # that end. What has to hold HERE is the input nixflat is handed: a selection containing both
+    # a Flathub app and a non-Flathub one must not collapse to one remote for both, which is the
+    # shape a bare-id list (or a remote resolved once per host rather than once per app) would
+    # have produced.
+    (check "flatpakApps/mixed-selection-keeps-each-app-on-its-own-remote"
+      (cfgMixed.nixmsg.flatpakApps == [
+        { id = "com.discordapp.Discord"; remoteName = "flathub"; remoteUrl = "https://flathub.org/repo/flathub.flatpakrepo"; }
+        { id = "ch.threema.threema-desktop"; remoteName = "threema-desktop"; remoteUrl = "https://releases.threema.ch/flatpak/threema-desktop/"; }
+      ])
+      "got: ${builtins.toJSON cfgMixed.nixmsg.flatpakApps}")
 
-    (check "script/threema-only-does-not-add-flathub"
-      (!(lib.hasInfix "remote-add --system --if-not-exists flathub" (scriptOf cfgThreemaOnly)))
-      "script: ${scriptOf cfgThreemaOnly}")
-
-    (check "script/threema-only-installs-from-threema-remote-not-flathub"
-      (lib.hasInfix "flatpak install --system --noninteractive threema-desktop ch.threema.threema-desktop" (scriptOf cfgThreemaOnly)
-        && !(lib.hasInfix "flatpak install --system --noninteractive flathub ch.threema.threema-desktop" (scriptOf cfgThreemaOnly)))
-      "script: ${scriptOf cfgThreemaOnly}")
-
-    # ── the flip side: a genuine Flathub app is unaffected by the fix ──
-    (check "script/flathub-only-adds-flathub-remote"
-      (lib.hasInfix "flatpak remote-add --system --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo" (scriptOf cfgFlathubOnly))
-      "script: ${scriptOf cfgFlathubOnly}")
-
-    (check "script/flathub-only-does-not-add-threema-remote"
-      (!(lib.hasInfix "threema-desktop" (scriptOf cfgFlathubOnly)))
-      "script: ${scriptOf cfgFlathubOnly}")
-
-    (check "script/flathub-only-installs-discord-from-flathub"
-      (lib.hasInfix "flatpak install --system --noninteractive flathub com.discordapp.Discord" (scriptOf cfgFlathubOnly))
-      "script: ${scriptOf cfgFlathubOnly}")
-
-    # ── mixed: BOTH remotes present, each app installs from ITS OWN remote, never crossed ──
-    (check "script/mixed-adds-both-remotes"
-      (lib.hasInfix "remote-add --system --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo" (scriptOf cfgMixed)
-        && lib.hasInfix "remote-add --system --if-not-exists threema-desktop https://releases.threema.ch/flatpak/threema-desktop/" (scriptOf cfgMixed))
-      "script: ${scriptOf cfgMixed}")
-
-    (check "script/mixed-threema-installs-from-threema-remote"
-      (lib.hasInfix "flatpak install --system --noninteractive threema-desktop ch.threema.threema-desktop" (scriptOf cfgMixed))
-      "script: ${scriptOf cfgMixed}")
-
-    (check "script/mixed-discord-installs-from-flathub-not-threema-remote"
-      (lib.hasInfix "flatpak install --system --noninteractive flathub com.discordapp.Discord" (scriptOf cfgMixed)
-        && !(lib.hasInfix "flatpak install --system --noninteractive threema-desktop com.discordapp.Discord" (scriptOf cfgMixed)))
-      "script: ${scriptOf cfgMixed}")
-
-    # ── no flatpak-channel app declared: the oneshot renders no unit at all ──
-    (check "no-flatpak-app/unit-absent"
-      (!(cfgNoFlatpak.systemd.services ? "nixmsg-flatpak-install"))
-      "systemd.services keys: ${builtins.toJSON (builtins.attrNames cfgNoFlatpak.systemd.services)}")
+    # ── no flatpak-channel app declared: the output is empty, not a bare Flathub default ──
+    # nixflat renders no unit at all for an empty list (its own `empty/unit-absent`), so this is
+    # the whole of what nixmsg must guarantee for that case.
+    (check "flatpakApps/empty-when-nothing-uses-the-flatpak-channel"
+      (cfgNoFlatpak.nixmsg.flatpakApps == [ ])
+      "got: ${builtins.toJSON cfgNoFlatpak.nixmsg.flatpakApps}")
 
     # ── autostart launch command uses the real binary, never the package name (system-plane) ──
     (check "startupCommands/system-plane-uses-binary-not-package-name"

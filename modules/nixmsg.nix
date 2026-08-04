@@ -153,9 +153,12 @@ in
       readOnly = true;
       description = ''
         Enabled apps resolved to the "flatpak" channel, as `{ id, remoteName, remoteUrl }`.
-        Neither a NixOS nor an Arch package manager installs these — see
-        modules/flatpak-install.nix, imported by both platform backends, which installs them via
-        a systemd oneshot.
+        Neither a NixOS nor an Arch package manager installs these, and NEITHER DOES THIS REPO —
+        this list is inert until a consumer hands it to an installer. nixflat
+        (github:julian-corbet/nixflat-corbet-ch) is the one written against this exact shape, and
+        it accepts several catalogues at once, which is the point:
+
+            nixflat.apps = config.nixmsg.flatpakApps ++ config.nixoffice.flatpakApps;
 
         Carries the remote alongside the id RATHER THAN a bare id list, because "which Flatpak
         remote" is not always Flathub — see lib/catalogue.nix's `flatpakRemote` field, and its

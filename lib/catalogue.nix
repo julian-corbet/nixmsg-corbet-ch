@@ -33,7 +33,8 @@
 #
 # `flatpakRemote` names WHICH remote `flatpak` actually lives on, `null` meaning Flathub — the
 # assumption every consumer of this catalogue used to hardcode instead of reading it from here
-# (modules/flatpak-install.nix `remote-add`'d only Flathub and installed only from it). That
+# (this repo's own installer, now nixflat's, `remote-add`'d only Flathub and installed only from
+# it before that was fixed). That
 # assumption is false for Threema specifically: `ch.threema.threema-desktop` does NOT exist on
 # Flathub at all — Flathub's own Threema listing is `ch.threema.threema-web-desktop`, a DIFFERENT
 # app (the browser-wrapper variant, not the desktop client this catalogue names). The real desktop

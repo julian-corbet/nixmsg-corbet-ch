@@ -24,13 +24,15 @@
       nixosModules.nixmsg = ./modules/nixmsg.nix;
       systemManagerModules.nixmsg = ./modules/nixmsg.nix;
 
-      # NixOS backend — installs via environment.systemPackages + the Flatpak-channel oneshot.
+      # NixOS backend — installs via environment.systemPackages.
       nixosModules.default = ./modules/nixos.nix;
       nixosModules.install = ./modules/nixos.nix;
 
-      # Arch / system-manager backend — publishes archPackages/aurPackages for the host's own
-      # pacman reconciler, plus the same Flatpak-channel oneshot (platform-agnostic).
-      systemManagerModules.default = ./modules/arch.nix;
+      # Arch / system-manager: the policy module IS the backend. Nothing platform-specific is left
+      # to do on this plane — the lists are published for the host's own pacman reconciler to
+      # consume (`nixarch.packages.pacman = config.nixmsg.archPackages;`), and the Flatpak channel
+      # is nixflat's job now rather than a second oneshot here. See modules/nixos.nix's header.
+      systemManagerModules.default = ./modules/nixmsg.nix;
 
       # Home-manager — autostart + workspace-pin intent, compositor-agnostic.
       homeManagerModules.default = ./modules/home.nix;
@@ -40,8 +42,8 @@
       lib.catalogue = import ./lib/catalogue.nix { };
 
       # EVAL-TIME checks only — see checks/default.nix's own header for what's under test and why
-      # it exists (modules/flatpak-install.nix's remote-aware rendering, and the
-      # modules/nixmsg.nix `flatpakApps` output that feeds it).
+      # it exists (modules/nixmsg.nix's `flatpakApps` output carrying a remote per APP, and the
+      # autostart launch commands resolving to a binary rather than a package name).
       checks = forAllSystems (system: import ./checks { pkgs = pkgsFor system; });
 
       formatter = forAllSystems (system: (pkgsFor system).nixpkgs-fmt);

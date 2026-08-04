@@ -11,11 +11,11 @@ Flatpak, and a nixpkgs attribute. A selection resolves to a package NAME per cha
 role — "signal" is not "an encrypted messenger you might swap for another," it is the thing that
 was asked for by name. Three backends consume it:
 
-- **`modules/nixos.nix`** — installs via `environment.systemPackages` + the Flatpak-channel
-  oneshot.
-- **`modules/arch.nix`** — publishes `nixmsg.archPackages` / `nixmsg.aurPackages` for the host's
-  own pacman reconciler (this module has no installer of its own on Arch, same as nixdev), plus
-  the same Flatpak-channel oneshot.
+- **`modules/nixos.nix`** — installs via `environment.systemPackages`.
+- **`modules/nixmsg.nix` itself, on system-manager** — publishes `nixmsg.archPackages` /
+  `nixmsg.aurPackages` for the host's own pacman reconciler. There is no separate Arch backend:
+  this module has no installer of its own on Arch (same as nixdev), so once the Flatpak installer
+  moved out there was nothing platform-specific left for one to hold.
 - **`modules/home.nix`** — home-manager: autostart commands and workspace-pin app-ids, both
   compositor-agnostic. Autostart feeds `nixdesktop.startup`'s existing self-splicing contract;
   workspace-pin only resolves app-ids, never compositor syntax — writing the actual window rule
@@ -53,10 +53,9 @@ Left unset, `channel` auto-resolves to the best available channel (repo > aur > 
 | `flake.nix` | Flake entry point: `nixosModules`/`systemManagerModules`/`homeManagerModules` outputs, `lib.catalogue`. |
 | `lib/catalogue.nix` | The app catalogue: one entry per app, with its repo/aur/flatpak/nixpkgs identity and Wayland app-id. |
 | `modules/nixmsg.nix` | Platform-neutral options + channel resolution. |
-| `modules/nixos.nix`, `modules/arch.nix` | Platform backends. |
-| `modules/flatpak-install.nix` | Shared Flatpak-channel installer (systemd oneshot), imported by both backends. Remote-aware — installs each app from whichever remote its catalogue entry actually names, not just Flathub. |
+| `modules/nixos.nix` | The NixOS backend. There is no Arch one — see above. |
 | `modules/home.nix` | Home-manager: autostart + workspace-pin. |
-| `checks/` | `nix flake check` — eval-time proof of `flatpakApps`/`flatpak-install.nix`'s rendering. |
+| `checks/` | `nix flake check` — eval-time proof of `flatpakApps` and the autostart commands. |
 
 ## Platform support
 

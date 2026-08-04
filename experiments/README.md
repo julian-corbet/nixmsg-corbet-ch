@@ -15,7 +15,7 @@ that distinction mattered for real this time (`pkgs.zoom` resolves, and is not Z
 ## Table of contents
 
 002. Threema's aur/nixpkgs from-source build does not share the Flatpak repackage's app-id — confirmed different builds, the aur/nixpkgs side's real value is still open
-003. `flatpak-install.nix` assumes `--system` scope is right for every consumer; untested against a `--user`-only host
+003. *(moved to nixflat)* — `--system` Flatpak scope, untested against a `--user`-only host
 004. The channel auto-resolution order (repo > aur > flatpak) has never been exercised against a host with `aurUser` unset
 005. Zoom's Wayland app-id could not be settled by either live or source verification
 
@@ -50,15 +50,14 @@ same technique that settled `teams`) if a live check isn't available first.
 
 **Status:** open.
 
-## 003 — `--system` Flatpak scope is asserted, not tested against every shape
+## 003 — `--system` Flatpak scope *(moved to nixflat, experiment 001)*
 
-**Question:** `modules/flatpak-install.nix` installs every flatpak-channel app at `--system`
-scope unconditionally, reasoned (see that file's own header) as the right default for a
-single-operator workstation with no per-user Flatpak wiring. Never tested against a host that
-only has `flatpak --user` available (no root, or a shared multi-user box where `--system` isn't
-wanted).
+The installer this question was about is no longer in this repo — it is nixflat's
+(`github:julian-corbet/nixflat-corbet-ch`, `modules/install.nix`), and so is the open question.
+The number is kept rather than reused: renumbering 004+ to close the gap would silently change
+what an older note referring to "nixmsg experiment 005" points at.
 
-**Status:** open; not a blocker for any host this catalogue currently targets.
+**Status:** open, elsewhere. Tracked at nixflat's `experiments/README.md` § 001.
 
 ## 004 — Auto-resolution untested against `aurUser == null`
 
