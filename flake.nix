@@ -1,5 +1,5 @@
 {
-  description = "nixmsg — messenger apps (Discord, Telegram, Teams, Threema, Signal, WhatsApp, Element, Zoom), declared per host";
+  description = "nixmsg — messenger apps (Discord, Telegram, Teams, Threema, Signal, WhatsApp, Element, Zoom, Mumble), declared per host";
 
   # NO INPUTS FOR CONSUMERS. Same reasoning as nixdev: this flake is options plus a catalogue,
   # taking `pkgs` from the consumer's own evaluation rather than pinning a nixpkgs, so a real host

@@ -152,13 +152,19 @@
 #             whether Zoom's own code calls it, or with what string. `StartupWMClass=zoom`, read
 #             from two independent shipped `.desktop` files, is kept below as the best available
 #             placeholder — no longer claimed as settled.
+#   mumble    LIVE — launched on a live Arch host (2026-08-04), `scrollmsg -t get_tree`: app_id
+#             "info.mumble.Mumble" for both windows Mumble opens on first run (the main window
+#             and its audio-config wizard dialog — same id for both). NOT "mumble": that's
+#             `StartupWMClass=mumble` in the shipped `.desktop` file
+#             (`/usr/share/applications/info.mumble.Mumble.desktop`), exactly the wrong X11-only
+#             field this header explains above — the live capture is the one kept.
 #
-# EVERY `flatpak` ID BELOW WAS CHECKED AGAINST A LIVE FLATHUB, not assumed — seven resolve there
-# (discord, telegram, signal, element, teams, whatsapp, zoom; confirmed via `flatpak remote-ls
-# flathub` and, for whatsapp/zoom specifically, `flatpak remote-info flathub <id>`, 2026-08-03);
-# threema's does not and carries `flatpakRemote` naming its real vendor repo instead. Do not add a
-# `flatpak` id to a future entry without the same check — a wrong id is invisible at eval time and
-# only surfaces as an install failure on a real host.
+# EVERY `flatpak` ID BELOW WAS CHECKED AGAINST A LIVE FLATHUB, not assumed — eight resolve there
+# (discord, telegram, signal, element, teams, whatsapp, zoom, mumble; confirmed via `flatpak
+# remote-ls flathub` and, for whatsapp/zoom/mumble specifically, `flatpak remote-info flathub
+# <id>`, 2026-08-03/2026-08-04); threema's does not and carries `flatpakRemote` naming its real
+# vendor repo instead. Do not add a `flatpak` id to a future entry without the same check — a
+# wrong id is invisible at eval time and only surfaces as an install failure on a real host.
 #
 { ... }:
 {
@@ -421,5 +427,35 @@
     # calls it, or with what string.
     dataPath = ".config/zoomus.conf";
     appId = "zoom";
+  };
+
+  mumble = {
+    # VOICE, NOT CHAT — the one entry here that is not a messaging client. Kept in this catalogue
+    # anyway because the operator's own definition for this table is by USE, not by protocol:
+    # this is the app you open to talk to people, the same slot Discord/Teams/Zoom already fill
+    # here with their own voice channels, and a ninth "just voice" table would only split one
+    # install/autostart/workspace-pin mechanism into two for no real gain.
+    #
+    # extra/mumble, confirmed 2026-08-04 (`pacman -Qi mumble` -> `Installed From:
+    # cachyos-extra-v3`, CachyOS's mirror of Arch `extra`). No AUR needed.
+    repo = "mumble";
+    aur = null;
+    # pacman -Ql mumble | grep /usr/bin/ -> /usr/bin/mumble AND /usr/bin/mumble-overlay,
+    # confirmed on a live Arch host, 2026-08-04. NOT "mumble-overlay": that binary is the
+    # LD_PRELOAD in-game overlay helper (an optional dependency of the package, "bash: for
+    # mumble-overlay"), not the client itself — launching it directly opens nothing.
+    binary = "mumble";
+    # nix eval --raw <pinned nixpkgs>#legacyPackages.x86_64-linux.mumble.name -> mumble-1.5.901,
+    # confirmed 2026-08-04 against the exact nixpkgs revision infra's flake.lock pins (nixpkgs
+    # tracks its own point in mumble's history, same expected drift zapzap's own entry documents).
+    nixpkgs = "mumble";
+    flatpak = "info.mumble.Mumble";
+    # Confirmed live against `flatpak remote-info flathub info.mumble.Mumble`, 2026-08-04 —
+    # genuinely on Flathub (version 1.5.915 there, matching the repo package's own version).
+    flatpakRemote = null;
+    # LIVE — see the header's own per-app section above for the capture and the StartupWMClass
+    # contrast.
+    dataPath = ".config/Mumble";
+    appId = "info.mumble.Mumble";
   };
 }

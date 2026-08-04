@@ -127,6 +127,21 @@ let
     nixmsg.home.relocateTo = "/example/msg";
   };
 
+  # ── Fixture 7: mumble (added 2026-08-04, repo channel) autostart + workspace pin on BOTH
+  # planes — proves the new catalogue entry's `binary`/`appId` fields are wired all the way
+  # through the same mechanism telegram's fixtures above exercise, not just present in the table.
+  # mumble's catalogue entry carries only a "repo" channel, so this also exercises archPackages.
+  cfgMumbleSystem = evalMod {
+    nixmsg.apps.mumble.enable = true;
+    nixmsg.autostart = [ "mumble" ];
+    nixmsg.workspacePin.apps = [ "mumble" ];
+  };
+
+  cfgMumbleHome = evalHomeMod {
+    nixmsg.home.autostart = [ "mumble" ];
+    nixmsg.home.workspacePin.apps = [ "mumble" ];
+  };
+
   results = [
     # ── relocate: a Qt app and a Flatpak app both get a symlink at their OWN data path, which is
     #    the whole reason this is not desktopOverride.dataDir (Electron's --user-data-dir reaches
@@ -210,6 +225,31 @@ let
     (check "startupCommands/home-plane-does-not-fall-back-to-package-name"
       (!(builtins.elem "telegram-desktop" cfgAutostartTelegramHome.nixmsg.home.startupCommands))
       "got: ${builtins.toJSON cfgAutostartTelegramHome.nixmsg.home.startupCommands}")
+
+    # ── mumble: new-entry non-vacuity, both planes ──
+    (check "mumble/system-plane-archPackages-includes-the-repo-package"
+      (cfgMumbleSystem.nixmsg.archPackages == [ "mumble" ])
+      "got: ${builtins.toJSON cfgMumbleSystem.nixmsg.archPackages}")
+
+    (check "mumble/system-plane-aurPackages-stays-empty"
+      (cfgMumbleSystem.nixmsg.aurPackages == [ ])
+      "mumble has no AUR channel -- got: ${builtins.toJSON cfgMumbleSystem.nixmsg.aurPackages}")
+
+    (check "mumble/system-plane-autostart-uses-the-real-binary-not-mumble-overlay"
+      (cfgMumbleSystem.nixmsg.startupCommands == [ "mumble" ])
+      "got: ${builtins.toJSON cfgMumbleSystem.nixmsg.startupCommands}")
+
+    (check "mumble/system-plane-workspace-pin-resolves-to-the-live-verified-app-id"
+      (cfgMumbleSystem.nixmsg.pinnedAppIds == [ "info.mumble.Mumble" ])
+      "got: ${builtins.toJSON cfgMumbleSystem.nixmsg.pinnedAppIds}")
+
+    (check "mumble/home-plane-autostart-uses-the-real-binary"
+      (cfgMumbleHome.nixmsg.home.startupCommands == [ "mumble" ])
+      "got: ${builtins.toJSON cfgMumbleHome.nixmsg.home.startupCommands}")
+
+    (check "mumble/home-plane-workspace-pin-resolves-to-the-live-verified-app-id"
+      (cfgMumbleHome.nixmsg.home.pinnedAppIds == [ "info.mumble.Mumble" ])
+      "got: ${builtins.toJSON cfgMumbleHome.nixmsg.home.pinnedAppIds}")
   ];
 
   failed = builtins.filter (r: !r.ok) results;
