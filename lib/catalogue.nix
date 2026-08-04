@@ -327,13 +327,21 @@
     #
     # Whatsie was this table's previous pick; it isn't gone from the AUR, it's simply no longer
     # the better-maintained of the two by any measure checked here — revisit this pick if that
-    # gap closes, not on taste. (AUR also hosts "zapzap-bin", a separately-maintained, 1-vote
-    # package installing from the project's published wheel rather than building from source; not
-    # picked here because the from-source "zapzap" package already builds cleanly and carries the
-    # adoption signal above — same reasoning this table already applies to threema's from-source
-    # AUR build over a prebuilt alternative.)
+    # gap closes, not on taste.
+    #
+    # "zapzap-bin" RATHER THAN "zapzap", and the adoption numbers are the wrong criterion here.
+    # Both package the SAME upstream at the same version (7.2 at the time of writing); the only
+    # difference is that "zapzap" compiles PyQt6 + PyQt6-WebEngine on every host that installs it
+    # and "zapzap-bin" installs the project's own published wheel. A fleet pays that compile once
+    # per machine, and a source build is one more thing that can fail on a host with a slightly
+    # different toolchain — which it did, on a container where the from-source package aborted
+    # while every other declared package converged. Vote counts measure how many people run a
+    # package, not whether building it is a sensible thing for a reconciler to do unattended.
+    #
+    # The artifact still comes from upstream either way; what is skipped is the local compile,
+    # not the provenance.
     repo = null;
-    aur = "zapzap";
+    aur = "zapzap-bin";
     # pyproject.toml's own [project.scripts] entry point: `zapzap = "zapzap.__main__:main"` — read
     # directly out of upstream source (tag 7.2), matching the AUR PKGBUILD's wheel install and the
     # pkgname itself; not installed on a live Arch host to also check with pacman -Ql.
