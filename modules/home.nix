@@ -106,6 +106,48 @@ in
       description = "Per-app channel, mirroring the system-plane choice — only matters for the launch command (flatpak apps launch via `flatpak run`, everything else by binary name).";
     };
 
+
+    # ── Relocating an app's data out of $HOME ──────────────────────────────────────────────────
+    #
+    # `desktopOverride.<app>.dataDir` cannot do this job. It renders Electron's --user-data-dir,
+    # so it reaches exactly the Electron apps and silently does nothing for the rest -- and this
+    # catalogue is not all Electron: Telegram and ZapZap are Qt, and Threema is a Flatpak whose
+    # data lives under ~/.var/app inside a sandbox that must be granted access to the target
+    # before it can follow anything out.
+    #
+    # A symlink at each app's own data path works for every toolkit and every packaging, because
+    # it is the filesystem answering rather than the application cooperating. mkOutOfStoreSymlink
+    # rather than a managed copy: the target is mutable state the app writes constantly, so it
+    # must NOT live in the nix store, and home-manager must not try to own its contents.
+    #
+    # WHY RELOCATE AT ALL is a storage question, not a messaging one: this data is large, changes
+    # constantly, and on a host that snapshots $HOME every changed block is pinned by every
+    # snapshot that follows. Giving it its own subvolume/dataset is what lets it carry its own
+    # retention. The consumer decides where; this module only knows which path each app uses.
+    #
+    # A FLATPAK APP NEEDS ONE MORE STEP the consumer must take: the sandbox has no access to the
+    # target by default, so a `flatpak override --filesystem=<target>` is required or the app
+    # sees a dangling link. Nothing here can grant that -- it is host state, not user config.
+    relocate = lib.mkOption {
+      type = lib.types.listOf (lib.types.enum appNames);
+      default = [ ];
+      description = ''
+        Apps whose data directory should live under `relocateTo` instead of its default place in
+        $HOME, reached by a symlink at the original path.
+      '';
+    };
+
+    relocateTo = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "/home/someone/msg";
+      description = ''
+        Absolute path of the directory holding relocated app data; each app in `relocate` gets a
+        `<relocateTo>/<app>` leaf. Creating it, and giving it whatever snapshot or backup policy
+        it deserves, is the consumer's job -- this module only points at it.
+      '';
+    };
+
     workspacePin = {
       workspace = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
@@ -176,6 +218,17 @@ in
   };
 
   config = {
+    # throwIf rather than an `assertions` entry: this module is evaluated standalone by the
+    # checks, where the module system carrying `assertions` is not composed, and a guard that
+    # only fires inside a full home-manager evaluation is a guard that the tests cannot see.
+    home.file = lib.throwIf (cfg.relocate != [ ] && cfg.relocateTo == null)
+      "nixmsg.home.relocate names apps but nixmsg.home.relocateTo is null -- there is nowhere to point their data at."
+      (lib.listToAttrs (map
+        (n: lib.nameValuePair catalogue.${n}.dataPath {
+          source = config.lib.file.mkOutOfStoreSymlink "${cfg.relocateTo}/${n}";
+        })
+        cfg.relocate));
+
     nixmsg.home.startupCommands = map launchCommand cfg.autostart;
     nixmsg.home.pinnedAppIds = map (n: catalogue.${n}.appId) cfg.workspacePin.apps;
 

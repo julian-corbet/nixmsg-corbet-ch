@@ -174,6 +174,7 @@
     # Confirmed live against `flatpak remote-ls flathub`, 2026-08-03 — genuinely on Flathub.
     flatpakRemote = null;
     # LIVE — launched on a live Arch host (2026-08-03), scrollmsg -t get_tree: app_id "discord".
+    dataPath = ".config/discord";
     appId = "discord";
   };
 
@@ -193,6 +194,7 @@
     # LIVE, and the proof cited in the header above: was already running on a live Arch host,
     # scrollmsg -t get_tree: app_id "org.telegram.desktop" (the desktop-file id) — NOT
     # "TelegramDesktop" (that's StartupWMClass, the wrong X11-only field; see the header).
+    dataPath = ".local/share/TelegramDesktop";
     appId = "org.telegram.desktop";
   };
 
@@ -216,6 +218,7 @@
     # Wayland app_id is this string with the .desktop suffix stripped. Live attempt aborted:
     # signal-desktop's local DB failed to decrypt against this host's current keyring backend (an
     # unrelated, in-flight issue) and it crashed before ever mapping a window.
+    dataPath = ".config/Signal";
     appId = "signal";
   };
 
@@ -238,6 +241,7 @@
     # (read directly out of /usr/lib/element/app.asar on a live Arch host), with the developers'
     # own comment attached to the call: "Set the desktop name explicitly to ensure correct
     # WM_CLASS and Wayland app_id when running with a system Electron binary."
+    dataPath = ".config/Element";
     appId = "Element";
   };
 
@@ -262,6 +266,7 @@
     # package.json's `name` field ("teams-for-linux", already a valid slug) — confirmed against
     # this package's actual shipped Electron version, 42.5.0. NOT the Flatpak id this table
     # previously guessed by naming convention.
+    dataPath = ".config/teams-for-linux";
     appId = "teams-for-linux";
   };
 
@@ -305,6 +310,7 @@
     # bundled Electron) whose source sets neither `desktopName` nor calls `setDesktopName()`
     # anywhere: UNVERIFIED. This field holds the one confirmed value; do not assume it also
     # matches the aur/nixpkgs channel's real window.
+    dataPath = ".var/app/ch.threema.threema-desktop";
     appId = "Threema";
   };
 
@@ -349,6 +355,7 @@
     # point moves independent of this table. The app_id claim above does not depend on which
     # version is actually pinned: setDesktopFileName's argument hasn't changed across the tags
     # checked here.
+    dataPath = ".config/zapzap";
     appId = "com.rtosta.zapzap";
   };
 
@@ -385,6 +392,7 @@
     # afterward. Source: the vendor binary is proprietary and stripped; it links the
     # QGuiApplication::setDesktopFileName symbol, but nothing confirms whether Zoom's own code
     # calls it, or with what string.
+    dataPath = ".config/zoomus.conf";
     appId = "zoom";
   };
 }

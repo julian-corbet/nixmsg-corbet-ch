@@ -63,6 +63,12 @@ let
     options = {
       xdg.dataFile = lib.mkOption { type = lib.types.attrsOf lib.types.attrs; default = { }; };
       xdg.configFile = lib.mkOption { type = lib.types.attrsOf lib.types.attrs; default = { }; };
+      home.file = lib.mkOption { type = lib.types.attrsOf lib.types.attrs; default = { }; };
+      # `relocate` renders through home-manager's own mkOutOfStoreSymlink, which lives on
+      # `config.lib.file` rather than in nixpkgs' lib. Stubbing it to the identity keeps the
+      # rendered target readable as a plain path in the assertions below, so a check can state
+      # the exact link target instead of matching a store path it cannot predict.
+      lib = lib.mkOption { type = lib.types.attrs; default = { file.mkOutOfStoreSymlink = p: p; }; };
     };
   };
 
@@ -115,7 +121,30 @@ let
     nixmsg.home.autostart = [ "telegram" ];
   };
 
+  cfgRelocate = evalHomeMod {
+    nixmsg.home.relocate = [ "telegram" "threema" ];
+    nixmsg.home.relocateTo = "/example/msg";
+  };
+
   results = [
+    # ── relocate: a Qt app and a Flatpak app both get a symlink at their OWN data path, which is
+    #    the whole reason this is not desktopOverride.dataDir (Electron's --user-data-dir reaches
+    #    neither of them) ──
+    {
+      name = "relocate/telegram-links-its-real-data-path";
+      ok = (cfgRelocate.home.file.".local/share/TelegramDesktop" or null) != null
+        && cfgRelocate.home.file.".local/share/TelegramDesktop".source == "/example/msg/telegram";
+    }
+    {
+      name = "relocate/threema-flatpak-path-is-relocated-too";
+      ok = (cfgRelocate.home.file.".var/app/ch.threema.threema-desktop" or null) != null
+        && cfgRelocate.home.file.".var/app/ch.threema.threema-desktop".source == "/example/msg/threema";
+    }
+    {
+      name = "relocate/unnamed-apps-are-left-alone";
+      ok = !(cfgRelocate.home.file ? ".config/Signal");
+    }
+
     # ── nixmsg.flatpakApps carries id + remote TOGETHER, not just a bare id list ──
     (check "flatpakApps/threema-carries-its-own-remote"
       (cfgThreemaOnly.nixmsg.flatpakApps == [
