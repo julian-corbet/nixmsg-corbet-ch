@@ -301,6 +301,24 @@
     flatpakRemote = {
       name = "threema-desktop";
       url = "https://releases.threema.ch/flatpak/threema-desktop/";
+      # A BARE OSTREE REPO, not a `.flatpakrepo` — and that distinction is load-bearing, not
+      # cosmetic. A `.flatpakrepo` (Flathub's url is one) carries the remote's public key inline
+      # as `GPGKey=`; this url carries nothing. `flatpak remote-add` accepts it regardless and
+      # succeeds, then every later operation on that remote fails with
+      # "Can't check signature: public key not found" — the key is missing, but the error names
+      # the summary, so it reads like a broken repo rather than a keyless remote.
+      #
+      # Threema's own documented install command is a `.flatpakref`, never a remote-add, for
+      # exactly this reason: the ref carries `GPGKey=`, `Url=` and `SuggestRemoteName=` together,
+      # so `flatpak install --from` registers the remote WITH its key and installs in one step.
+      # Verified live 2026-08-04 (HTTP 200, `GPGKey=` present); no `.flatpakrepo` is published at
+      # any conventional path (four probed, all 404).
+      #
+      # Found the hard way: a host that had this remote added BY HAND months earlier worked, and
+      # a fresh host failed — the difference being a `threema-desktop.trustedkeys.gpg` sitting in
+      # one repo and not the other. A catalogue that only names a url reproduces the hand-setup,
+      # not the working state.
+      flatpakref = "https://releases.threema.ch/flatpak/threema-desktop/ch.threema.threema-desktop.flatpakref";
     };
     # SPLIT, confirmed rather than merely suspected now — see the header and
     # ../experiments/README.md #002. The flatpak build's app_id is LIVE-verified "Threema":

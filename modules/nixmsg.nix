@@ -235,11 +235,16 @@ in
 
     nixmsg.archPackages = lib.unique (map (a: a.packageName) (lib.filter (a: a.channel == "repo") resolved));
     nixmsg.aurPackages = lib.unique (map (a: a.packageName) (lib.filter (a: a.channel == "aur") resolved));
+    # `flatpakref` travels with the id and remote for the same reason they travel together at all:
+    # it is a property of where this app really lives, and a consumer that had to look it up
+    # separately would be reconstructing the catalogue. Null for anything on Flathub — a
+    # `.flatpakrepo` url already carries its own signing key, so no per-app ref is needed.
     nixmsg.flatpakApps = lib.unique (map
       (a: {
         id = a.packageName;
         remoteName = if a.flatpakRemote == null then flathubRemote.name else a.flatpakRemote.name;
         remoteUrl = if a.flatpakRemote == null then flathubRemote.url else a.flatpakRemote.url;
+        flatpakref = if a.flatpakRemote == null then null else (a.flatpakRemote.flatpakref or null);
       })
       (lib.filter (a: a.channel == "flatpak") resolved));
 

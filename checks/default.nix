@@ -149,14 +149,28 @@ let
     # ── nixmsg.flatpakApps carries id + remote TOGETHER, not just a bare id list ──
     (check "flatpakApps/threema-carries-its-own-remote"
       (cfgThreemaOnly.nixmsg.flatpakApps == [
-        { id = "ch.threema.threema-desktop"; remoteName = "threema-desktop"; remoteUrl = "https://releases.threema.ch/flatpak/threema-desktop/"; }
+        { id = "ch.threema.threema-desktop"; remoteName = "threema-desktop"; remoteUrl = "https://releases.threema.ch/flatpak/threema-desktop/"; flatpakref = "https://releases.threema.ch/flatpak/threema-desktop/ch.threema.threema-desktop.flatpakref"; }
       ])
+      "got: ${builtins.toJSON cfgThreemaOnly.nixmsg.flatpakApps}")
+
+    # The ref is not decoration: threema's remoteUrl is a bare ostree repo carrying no signing
+    # key, so an installer given only the url produces a remote whose summary cannot be verified.
+    (check "flatpakApps/a-non-flatpakrepo-remote-carries-its-flatpakref"
+      (let a = builtins.head cfgThreemaOnly.nixmsg.flatpakApps; in
+        a.flatpakref != null && !(lib.hasSuffix ".flatpakrepo" a.remoteUrl))
       "got: ${builtins.toJSON cfgThreemaOnly.nixmsg.flatpakApps}")
 
     (check "flatpakApps/discord-defaults-to-flathub"
       (cfgFlathubOnly.nixmsg.flatpakApps == [
-        { id = "com.discordapp.Discord"; remoteName = "flathub"; remoteUrl = "https://flathub.org/repo/flathub.flatpakrepo"; }
+        { id = "com.discordapp.Discord"; remoteName = "flathub"; remoteUrl = "https://flathub.org/repo/flathub.flatpakrepo"; flatpakref = null; }
       ])
+      "got: ${builtins.toJSON cfgFlathubOnly.nixmsg.flatpakApps}")
+
+    # The other direction: a Flathub app needs no ref, because a .flatpakrepo url already carries
+    # the key. A catalogue that emitted one for everything would be inventing URLs.
+    (check "flatpakApps/a-flatpakrepo-remote-needs-no-ref"
+      (let a = builtins.head cfgFlathubOnly.nixmsg.flatpakApps; in
+        a.flatpakref == null && lib.hasSuffix ".flatpakrepo" a.remoteUrl)
       "got: ${builtins.toJSON cfgFlathubOnly.nixmsg.flatpakApps}")
 
     # ── mixed selection: each app still carries ITS OWN remote, never the other's ──
@@ -167,8 +181,8 @@ let
     # have produced.
     (check "flatpakApps/mixed-selection-keeps-each-app-on-its-own-remote"
       (cfgMixed.nixmsg.flatpakApps == [
-        { id = "com.discordapp.Discord"; remoteName = "flathub"; remoteUrl = "https://flathub.org/repo/flathub.flatpakrepo"; }
-        { id = "ch.threema.threema-desktop"; remoteName = "threema-desktop"; remoteUrl = "https://releases.threema.ch/flatpak/threema-desktop/"; }
+        { id = "com.discordapp.Discord"; remoteName = "flathub"; remoteUrl = "https://flathub.org/repo/flathub.flatpakrepo"; flatpakref = null; }
+        { id = "ch.threema.threema-desktop"; remoteName = "threema-desktop"; remoteUrl = "https://releases.threema.ch/flatpak/threema-desktop/"; flatpakref = "https://releases.threema.ch/flatpak/threema-desktop/ch.threema.threema-desktop.flatpakref"; }
       ])
       "got: ${builtins.toJSON cfgMixed.nixmsg.flatpakApps}")
 
