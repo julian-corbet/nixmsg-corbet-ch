@@ -15,6 +15,12 @@
 # already running — an unset `channel` auto-resolves to the best available (repo > aur >
 # flatpak), but an operator with a live Flatpak identity to preserve overrides it per host.
 #
+# THE "aur" CHANNEL IS NOT ALWAYS A SOURCE BUILD. `teams`'s `aur` value resolves through a plain
+# `pacman -Si` on a CachyOS host (its own `cachyos` repository, not the AUR) — `archRepoOn` on the
+# catalogue entry plus `nixmsg.distro` below is what tells `archPackages`/`aurPackages` to route
+# it to the pacman-direct list on such a host instead of through the AUR helper for no reason. See
+# `nixmsg.distro`'s own description and ../lib/catalogue.nix's `archRepoOn` paragraph.
+#
 # WHAT THIS DOES NOT OWN. Compositor window-rule / workspace-pin SYNTAX belongs to whichever
 # compositor module the consumer runs (nixscroll's `extraConfig`, niri's own window-rule option)
 # — nixmsg only computes and exposes the resolved intent (which app-ids, for the `workspacePin`
@@ -82,10 +88,44 @@ let
 
   enabledNames = lib.filter (n: cfg.apps.${n}.enable) appNames;
   resolved = map resolveApp enabledNames;
+
+  # An app resolved via the "aur" channel is genuinely AUR-only *for this host* unless the host's
+  # distro is one whose own repository carries it under the same name — see `archRepoOn` in
+  # ../lib/catalogue.nix, and the `teams` entry for the only case today. Deliberately resolved
+  # HERE rather than in the catalogue: which repositories a name is in is a fact about the world
+  # (the catalogue), which of them this machine can reach is a fact about the machine (this
+  # config) — same split github:julian-corbet/nixagent-corbet-ch draws for its own identically-
+  # named `fromAur`.
+  fromAur = a: a.channel == "aur" && !(lib.elem cfg.distro (a.archRepoOn or [ ]));
 in
 {
   options.nixmsg = {
     apps = lib.genAttrs appNames (name: appOptions name);
+
+    distro = lib.mkOption {
+      type = lib.types.enum [ "arch" "cachyos" ];
+      default = "arch";
+      description = ''
+        Which Arch-family distribution this host runs. Read for ONE purpose: deciding whether a
+        catalogue entry that is AUR-only upstream can come from a derivative's own repository
+        instead (`archRepoOn` in lib/catalogue.nix).
+
+        Defaults to "arch", the FLOOR rather than the common case, because the two answers fail
+        differently. Declaring "arch" on a CachyOS host costs a package a trip through the AUR
+        helper, which then finds it in a repository anyway — an AUR helper resolves repository
+        packages first, so nothing is built from source that did not need to be. Declaring
+        "cachyos" on a plain Arch host puts a name pacman cannot resolve into the pacman list,
+        and `pacman -S` fails a transaction ATOMICALLY: one unresolvable target aborts the whole
+        converge with "target not found" and takes every unrelated package in it down. A default
+        can only be wrong in one of those directions, so it is wrong in the recoverable one.
+
+        Declared, never probed — same reasoning nixagent states for its own identically-valued
+        `nixagent.distro`: this module is evaluated wherever the flake is built, which is not
+        necessarily the machine it targets, so eval-time detection would as often as not read the
+        wrong host's identity. Set it to match the box, alongside whatever the host already tells
+        nixarch.
+      '';
+    };
 
     autostart = lib.mkOption {
       type = lib.types.listOf (lib.types.enum appNames);
@@ -129,8 +169,10 @@ in
       type = lib.types.listOf lib.types.str;
       readOnly = true;
       description = ''
-        Enabled apps resolved to the "repo" channel, as official-Arch-repo package names. This
-        module installs nothing on Arch — feed it to whatever reconciler the host uses, e.g.
+        Enabled apps resolved to the "repo" channel, as official-Arch-repo package names, PLUS
+        any "aur"-channel app whose `archRepoOn` names this host's `nixmsg.distro` — see that
+        field in lib/catalogue.nix and `nixmsg.distro` above. This module installs nothing on
+        Arch — feed it to whatever reconciler the host uses, e.g.
 
           nixarch.packages.pacman = config.nixmsg.archPackages;
       '';
@@ -140,9 +182,10 @@ in
       type = lib.types.listOf lib.types.str;
       readOnly = true;
       description = ''
-        Enabled apps resolved to the "aur" channel, kept SEPARATE from archPackages because
-        `pacman -S` cannot resolve an AUR name — mixing the two aborts the whole transaction.
-        Wire to the AUR side of the same reconciler, e.g.
+        Enabled apps resolved to the "aur" channel, MINUS any app `archPackages` above already
+        claimed via `archRepoOn`, kept SEPARATE from archPackages because `pacman -S` cannot
+        resolve an AUR name — mixing the two aborts the whole transaction. Wire to the AUR side
+        of the same reconciler, e.g.
 
           nixarch.packages.aur = config.nixmsg.aurPackages;
       '';
@@ -233,8 +276,11 @@ in
 
     nixmsg.resolved = resolved;
 
-    nixmsg.archPackages = lib.unique (map (a: a.packageName) (lib.filter (a: a.channel == "repo") resolved));
-    nixmsg.aurPackages = lib.unique (map (a: a.packageName) (lib.filter (a: a.channel == "aur") resolved));
+    # "repo" always lands here; "aur" lands here too, but only on the distro named in the entry's
+    # own `archRepoOn` — see `fromAur` above.
+    nixmsg.archPackages = lib.unique (map (a: a.packageName)
+      (lib.filter (a: a.channel == "repo" || (a.channel == "aur" && !(fromAur a))) resolved));
+    nixmsg.aurPackages = lib.unique (map (a: a.packageName) (lib.filter fromAur resolved));
     # `flatpakref` travels with the id and remote for the same reason they travel together at all:
     # it is a property of where this app really lives, and a consumer that had to look it up
     # separately would be reconstructing the catalogue. Null for anything on Flathub — a

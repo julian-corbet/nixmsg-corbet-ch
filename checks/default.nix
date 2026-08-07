@@ -142,6 +142,31 @@ let
     nixmsg.home.workspacePin.apps = [ "mumble" ];
   };
 
+  # ── Fixture 8: teams on both `nixmsg.distro` answers (added 2026-08-07 alongside `archRepoOn`)
+  # — the whole point of the mechanism is that this ONE catalogue entry resolves to a DIFFERENT
+  # output list depending on the host, so both directions have to be evaluated, not just one.
+  cfgTeamsArch = evalMod {
+    nixmsg.apps.teams.enable = true;
+    nixmsg.distro = "arch";
+  };
+
+  cfgTeamsCachyos = evalMod {
+    nixmsg.apps.teams.enable = true;
+    nixmsg.distro = "cachyos";
+  };
+
+  cfgTeamsDefaultDistro = evalMod {
+    nixmsg.apps.teams.enable = true;
+  };
+
+  # A second aur-channel app with NO `archRepoOn` at all, evaluated on the same "cachyos" distro
+  # that lifts teams -- proves the lift is scoped to the entry that names it, not a blanket "aur
+  # channel on a cachyos host always means repo" rule.
+  cfgThreemaCachyos = evalMod {
+    nixmsg.apps.threema = { enable = true; channel = "aur"; };
+    nixmsg.distro = "cachyos";
+  };
+
   results = [
     # ── relocate: a Qt app and a Flatpak app both get a symlink at their OWN data path, which is
     #    the whole reason this is not desktopOverride.dataDir (Electron's --user-data-dir reaches
@@ -250,6 +275,31 @@ let
     (check "mumble/home-plane-workspace-pin-resolves-to-the-live-verified-app-id"
       (cfgMumbleHome.nixmsg.home.pinnedAppIds == [ "info.mumble.Mumble" ])
       "got: ${builtins.toJSON cfgMumbleHome.nixmsg.home.pinnedAppIds}")
+
+    # ── archRepoOn/distro (added 2026-08-07): teams-for-linux resolves via `pacman -Si` on a
+    #    CachyOS host's OWN repo, is in NO upstream Arch repository, and IS in the AUR -- the
+    #    same shape nixagent's claude-code entry pinned first. BOTH distro answers matter: the
+    #    split is a property of the catalogue entry AND the host, so a check that only ever
+    #    evaluated one distro would leave half the resolution untested ──
+    (check "teams/is-aur-on-plain-arch-the-safe-floor-since-upstream-arch-packages-it-nowhere"
+      (cfgTeamsArch.nixmsg.aurPackages == [ "teams-for-linux" ]
+        && cfgTeamsArch.nixmsg.archPackages == [ ])
+      "got aurPackages=${builtins.toJSON cfgTeamsArch.nixmsg.aurPackages} archPackages=${builtins.toJSON cfgTeamsArch.nixmsg.archPackages}")
+
+    (check "teams/moves-to-the-pacman-list-on-a-distro-whose-own-repository-carries-it"
+      (cfgTeamsCachyos.nixmsg.archPackages == [ "teams-for-linux" ]
+        && cfgTeamsCachyos.nixmsg.aurPackages == [ ])
+      "got archPackages=${builtins.toJSON cfgTeamsCachyos.nixmsg.archPackages} aurPackages=${builtins.toJSON cfgTeamsCachyos.nixmsg.aurPackages}")
+
+    (check "teams/the-default-distro-is-the-recoverable-one-a-host-that-declares-nothing-gets-the-aur"
+      (cfgTeamsDefaultDistro.nixmsg.aurPackages == [ "teams-for-linux" ]
+        && cfgTeamsDefaultDistro.nixmsg.archPackages == [ ])
+      "got: ${builtins.toJSON cfgTeamsDefaultDistro.nixmsg}")
+
+    (check "teams/archRepoOn-is-scoped-to-the-entry-that-names-it-not-every-aur-app-on-that-distro"
+      (cfgThreemaCachyos.nixmsg.aurPackages == [ "threema-desktop" ]
+        && cfgThreemaCachyos.nixmsg.archPackages == [ ])
+      "threema-desktop carries no archRepoOn -- got aurPackages=${builtins.toJSON cfgThreemaCachyos.nixmsg.aurPackages} archPackages=${builtins.toJSON cfgThreemaCachyos.nixmsg.archPackages}")
   ];
 
   failed = builtins.filter (r: !r.ok) results;

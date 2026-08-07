@@ -42,6 +42,21 @@
 # Flathub cannot install this entry — not "installs the wrong version", genuinely cannot resolve
 # the id at all. See the `threema` entry below for the live values.
 #
+# `archRepoOn` (default `[ ]`, only present on `teams` today) names Arch DERIVATIVES whose own
+# repository carries an otherwise-AUR-only name, so a host on one of them gets the repo build
+# instead of a source build — teams-for-linux resolves via `pacman -Si` on a CachyOS host
+# (`Repository: cachyos`, CachyOS's OWN repo, not a `-v3`/`-v4` rebuild of an Arch one) but is in
+# NO upstream Arch repository at all (archlinux.org package search: 0 results), and IS in the AUR
+# (checked 2026-08-07; see the `teams` entry's own comment). A `pacman -Si` hit alone is NOT
+# sufficient evidence for treating a name as an official-repo package — trusting it alone would
+# hand a plain-Arch host a pacman target that cannot resolve, which fails the WHOLE transaction
+# (`pacman -S` is atomic), not just that one app. So `aur = "teams-for-linux"` stays the correct
+# FLOOR, and `archRepoOn` lifts it onto the pacman list only on a distro whose own repository is
+# known to carry it — consumed against `nixmsg.distro` in ../modules/nixmsg.nix, which documents
+# why that value is declared rather than inferred. Ported from
+# github:julian-corbet/nixagent-corbet-ch's identical `archRepoOn`/`distro` mechanism, written
+# for the exact same shape of problem (`claude-code`) one day before this file adopted it.
+#
 # `nixpkgs` is separate from all three: the attribute under a nixpkgs instance, or `null` where
 # none exists. Every one of the 8 entries below DOES have a nixpkgs attribute (confirmed via
 # `nix search nixpkgs` / `nix eval` against nixpkgs-unstable, 2026-08-03) — messenger clients
@@ -260,6 +275,28 @@
     # changes the Teams web app in ways its injected scripts depend on.
     repo = null;
     aur = "teams-for-linux";
+
+    # `archRepoOn` — see this file's header and nixagent's own lib/agents.nix `claude-code`
+    # entry, the case this mechanism was written for. Checked the same three ways, 2026-08-07:
+    #
+    #   `pacman -Si teams-for-linux` (CachyOS host) -> found, `Repository: cachyos`, 2.14.1-1 --
+    #                                    CachyOS's OWN repo, not a `-v3`/`-v4` rebuild of an Arch
+    #                                    repo, so this exists because that derivative chose to
+    #                                    ship it.
+    #   archlinux.org package search  -> 0 results. Upstream Arch does not package it, in any
+    #                                    repository, on any architecture.
+    #   AUR RPC                       -> present, PackageBase `teams-for-linux`, maintainer
+    #                                    `pschichtel`, 112 votes, maintained.
+    #
+    # Same shape as claude-code exactly: `aur = "teams-for-linux"` is the correct FLOOR for
+    # upstream Arch (nothing to fall back to there), and this host lifts it onto the pacman list
+    # only when `nixmsg.distro` says the host's own repository actually carries it — see
+    # `nixmsg.distro` in ../modules/nixmsg.nix. Before this field existed, an enabled `teams` on
+    # a CachyOS host still went through the AUR helper for a name pacman could have resolved
+    # directly — correct, since `aur = true`/a non-null `aur` value is the safe direction, but
+    # imprecise: a needless trip through paru and the `aurUser` dependency for a package that was
+    # never source-built in the first place.
+    archRepoOn = [ "cachyos" ];
     # pacman -Ql teams-for-linux | grep /usr/bin/ -> /usr/bin/teams-for-linux, confirmed on
     # a live Arch host.
     binary = "teams-for-linux";
