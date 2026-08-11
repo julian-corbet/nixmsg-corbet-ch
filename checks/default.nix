@@ -142,6 +142,14 @@ let
     nixmsg.home.workspacePin.apps = [ "mumble" ];
   };
 
+  # An XWayland app (whatsapp/ZapZap) pinned beside a Wayland-native one (mumble). The two must
+  # come out on SEPARATE lists: a compositor matches `app_id` and `class` with different criteria,
+  # so a consumer that reads only `pinnedAppIds` silently never matches the XWayland window --
+  # which is exactly the live bug that put this fixture here.
+  cfgXwaylandPinHome = evalHomeMod {
+    nixmsg.home.workspacePin.apps = [ "whatsapp" "mumble" ];
+  };
+
   # ── Fixture 8: teams on both `nixmsg.distro` answers (added 2026-08-07 alongside `archRepoOn`)
   # — the whole point of the mechanism is that this ONE catalogue entry resolves to a DIFFERENT
   # output list depending on the host, so both directions have to be evaluated, not just one.
@@ -275,6 +283,23 @@ let
     (check "mumble/home-plane-workspace-pin-resolves-to-the-live-verified-app-id"
       (cfgMumbleHome.nixmsg.home.pinnedAppIds == [ "info.mumble.Mumble" ])
       "got: ${builtins.toJSON cfgMumbleHome.nixmsg.home.pinnedAppIds}")
+
+    # ── XWayland pins land on their OWN list (added after a live miss) ─────────────────────────
+    # The regression these three guard: whatsapp's window is XWayland and has NO app_id at all, so
+    # it can only ever be matched on WM_CLASS. If its class leaked into `pinnedAppIds`, a consumer
+    # would emit `assign [app_id="^ZapZap$"]`, which matches nothing; if it were absent from both
+    # lists, the app would simply never be pinned. Both failures are silent at build time.
+    (check "xwayland-pin/class-does-not-leak-into-pinnedAppIds"
+      (cfgXwaylandPinHome.nixmsg.home.pinnedAppIds == [ "com.rtosta.zapzap" "info.mumble.Mumble" ])
+      "got: ${builtins.toJSON cfgXwaylandPinHome.nixmsg.home.pinnedAppIds}")
+
+    (check "xwayland-pin/only-the-xwayland-app-appears-in-pinnedX11Classes"
+      (cfgXwaylandPinHome.nixmsg.home.pinnedX11Classes == [ "ZapZap" ])
+      "a Wayland-native app must NOT gain a class entry -- got: ${builtins.toJSON cfgXwaylandPinHome.nixmsg.home.pinnedX11Classes}")
+
+    (check "xwayland-pin/a-pin-with-no-xwayland-app-yields-an-empty-class-list"
+      (cfgMumbleHome.nixmsg.home.pinnedX11Classes == [ ])
+      "got: ${builtins.toJSON cfgMumbleHome.nixmsg.home.pinnedX11Classes}")
 
     # ── archRepoOn/distro (added 2026-08-07): teams-for-linux resolves via `pacman -Si` on a
     #    CachyOS host's OWN repo, is in NO upstream Arch repository, and IS in the AUR -- the

@@ -177,7 +177,28 @@ in
     pinnedAppIds = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       readOnly = true;
-      description = "app-ids for workspacePin.apps — feed into your compositor's own window-rule/output-assignment syntax (e.g. nixscroll's extraConfig).";
+      description = "app-ids for workspacePin.apps — feed into your compositor's own window-rule/output-assignment syntax (e.g. nixscroll's extraConfig). Covers Wayland-native windows only; XWayland ones appear in `pinnedX11Classes` instead, and a consumer that writes rules needs BOTH.";
+    };
+
+    pinnedX11Classes = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      readOnly = true;
+      description = ''
+        X11 WM_CLASS values for those `workspacePin.apps` that map their window through XWayland
+        rather than natively — the companion to `pinnedAppIds`, and a consumer writing window
+        rules needs both lists or it silently misses these apps.
+
+        ── WHY A SECOND LIST AND NOT A WIDER `appId` ──────────────────────────────────────────
+        An XWayland window has NO `app_id`. The property does not exist on it, so a rule keyed on
+        `app_id` cannot match it at any value — this is not a matter of the catalogue holding the
+        wrong string. Compositors expose the two as separate criteria for exactly that reason
+        (`app_id=` vs `class=` in scroll/sway), so the declaration has to keep them separate too.
+
+        Measured, not assumed: zapzap's window reports `shell: "xwayland"`, `app_id: null`,
+        `window_properties.class: "ZapZap"` in a live `scrollmsg -t get_tree`, while its catalogue
+        `appId` — correctly read from upstream's own `setDesktopFileName()` — describes a Wayland
+        window this build never produces.
+      '';
     };
 
     # ── Per-app runtime tuning ────────────────────────────────────────────────────────────────
@@ -231,6 +252,12 @@ in
 
     nixmsg.home.startupCommands = map launchCommand cfg.autostart;
     nixmsg.home.pinnedAppIds = map (n: catalogue.${n}.appId) cfg.workspacePin.apps;
+
+    # `or null` + filter, unlike `pinnedAppIds` above: `x11Class` is present only on the entries
+    # whose window genuinely comes through XWayland, so a missing field is the NORMAL case here
+    # rather than a catalogue gap worth failing on.
+    nixmsg.home.pinnedX11Classes = lib.filter (c: c != null)
+      (map (n: catalogue.${n}.x11Class or null) cfg.workspacePin.apps);
 
     xdg.dataFile = lib.mapAttrs'
       (name: _: lib.nameValuePair

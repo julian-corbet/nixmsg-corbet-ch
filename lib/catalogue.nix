@@ -427,6 +427,25 @@
     # checked here.
     dataPath = ".config/zapzap";
     appId = "com.rtosta.zapzap";
+    # ...AND THE WINDOW IS XWAYLAND, so that correct `appId` describes a window this build never
+    # produces. Measured on a live Arch host with the AUR/nixpkgs build in daily use, `scrollmsg -t
+    # get_tree`: `shell: "xwayland"`, `app_id: null`, `window_properties.class: "ZapZap"`. An
+    # XWayland window has no `app_id` property at all, so a rule keyed on one cannot match it at
+    # ANY value — the `appId` above is not wrong, it is simply not the field a compositor has to
+    # match on for this app.
+    #
+    # NOTE THE CASE. "ZapZap" is the WM_CLASS the running window advertises; it is neither the
+    # `StartupWMClass=zapzap` in the shipped .desktop file (the field the header explains is the
+    # wrong one to read) nor the `com.rtosta.zapzap` desktop-file id. Three different strings for
+    # one app, and only this one selects its window.
+    #
+    # Qt sets WM_CLASS from the application NAME, and upstream sets the two independently, one line
+    # apart — read off the installed 7.x source, not inferred: zapzap/__init__.py:4
+    # `__appname__ = 'ZapZap'` and :7 `__desktopid__ = 'com.rtosta.zapzap'`, applied at
+    # zapzap/app/application.py:53 `app.setApplicationName(zapzap.__appname__)` and :55
+    # `app.setDesktopFileName(zapzap.__desktopid__)`. Both fields here come from that one file, so
+    # neither is a guess derived from the other.
+    x11Class = "ZapZap";
   };
 
   zoom = {
