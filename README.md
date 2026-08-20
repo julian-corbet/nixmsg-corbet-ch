@@ -1,9 +1,14 @@
 # nixmsg
 
-Messenger apps — Discord, Telegram, Teams, Threema, Signal, WhatsApp, Element, Zoom — declared per
-host instead of hand-installed and forgotten.
+Messaging, both ends of it: the messenger apps — Discord, Telegram, Teams, Threema, Signal,
+WhatsApp, Element, Zoom, Mumble — declared per host instead of hand-installed and forgotten, and
+the servers they talk to declared into a cluster instead of hand-written as YAML.
 
-## What this is
+The two planes are independent. Take the host half and never render a manifest; take the cluster
+half and never install a client. They live together because they are one subject seen from its two
+ends, and because a fact about a Matrix homeserver is not a fact about a Matrix client.
+
+## What this is — the host plane
 
 A platform-neutral catalogue (`lib/catalogue.nix`) naming each app's package identity on every
 real distribution channel it actually has: an official Arch repo package, an AUR package, a
@@ -55,7 +60,46 @@ Left unset, `channel` auto-resolves to the best available channel (repo > aur > 
 | `modules/nixmsg.nix` | Platform-neutral options + channel resolution. |
 | `modules/nixos.nix` | The NixOS backend. There is no Arch one — see above. |
 | `modules/home.nix` | Home-manager: autostart + workspace-pin. |
-| `checks/` | `nix flake check` — eval-time proof of `flatpakApps` and the autostart commands. |
+| `lib/servers.nix` | The server catalogue: what each cluster-side server IS — ports, the directories it writes, whether it runs its own database, how patient a probe must be. |
+| `modules/cluster.nix` | The cluster translator: declares into the `nixk3s` app grammar and renders no Kubernetes object of its own. |
+| `examples/all/values.nix` | A complete invented declaration of both servers, rendered by `nix flake check`. |
+| `checks/` | `nix flake check` — eval-time proof of `flatpakApps` and the autostart commands, plus the cluster module's guards and the manifests they produce. |
+
+## The cluster plane
+
+`lib/servers.nix` catalogues the messaging SERVERS: Mattermost (team chat) and Tuwunel (a Matrix
+homeserver). It holds only what is true of that software wherever anyone runs it — the ports, the
+directories it writes and what kind of thing may back each one, whether it runs its own database,
+how long a cold start may take before a probe calls it a failure. No address, no node, no
+namespace, no uid and no secret appears anywhere in it; those are one deployment's facts and arrive
+from a declaration.
+
+`modules/cluster.nix` translates a declaration into the [nixk3s](https://github.com/julian-corbet/nixk3s-corbet-ch)
+app grammar, which is what actually renders the Argo CD Application, Namespace, Deployment and
+Service. This repository renders no Kubernetes object of its own; what it adds is the knowledge the
+grammar cannot have.
+
+```nix
+nixmsg.servers.chat = {
+  app = "mattermost";
+  version = "10.0.0";
+  namespace = "chat";
+  createNamespace = true;
+  exposure = "public";
+
+  helperImage = "busybox@sha256:...";        # runs the ownership fix and the database wait
+  database = { host = "postgres"; port = 5432; };
+  state.data = { hostPath = "/srv/chat"; owner = { uid = 2000; gid = 2000; }; };
+  secrets.chat-env.envFrom = true;
+};
+```
+
+The guards are the point. Backing a directory the server does not write, or leaving one it does
+write unbacked, is an eval error. So is backing durable history with a Secret, or a projected
+credential with a node path. So is omitting the database a server cannot start without, or the
+environment variable it can never change afterwards. And so is telling any of them to idle: messaging
+is a push medium, so a scaled-to-zero server does not delay the message that would have woken it, it
+drops it — the catalogue records that as a property of the software and the module refuses on it.
 
 ## Platform support
 
