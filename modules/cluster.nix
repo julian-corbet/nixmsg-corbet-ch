@@ -27,7 +27,7 @@
 # database backed by a Secret, a password file backed by a node path — is an eval error rather than
 # a workload that starts and behaves strangely.
 #
-# THE FIVE QUESTIONS ONLY A DECLARATION CAN ANSWER, listed once here because each of them looks at
+# THE SIX QUESTIONS ONLY A DECLARATION CAN ANSWER, listed once here because each of them looks at
 # first like something a catalogue ought to know:
 #
 #   1. HOW MUCH CPU AND MEMORY (`resources`). A request is a claim on one cluster's hardware next to
@@ -44,8 +44,13 @@
 #   5. WHAT THE HELPER STEPS DO INSIDE THEIR OWN IMAGE (`prestart.prepare.<name>.mountPath`,
 #      `prestart.databaseWait.notice`). The helper image is the deployment's choice, so the paths and
 #      the log line inside it are too.
+#   6. WHETHER THESE OBJECTS ALREADY EXIST (`adopt`). Not a fact about the pod at all — a fact about
+#      one cluster's history, and the only reason it is a question is that the answer changes the
+#      rendered Application: adopting one renders server-side apply and diff so Argo compares against
+#      what the API server holds. The same server is adopted on the cluster that has run it for years
+#      and created fresh on the one standing up beside it.
 #
-# None of the five is a passthrough of a nested attrset: each is a named scalar the module reads and
+# None of the six is a passthrough of a nested attrset: each is a named scalar the module reads and
 # renders somewhere specific, and the catalogue still decides WHETHER each thing happens at all.
 #
 # ── WHY THERE IS NO SHARED NAMESPACE DEFAULT ───────────────────────────────────────────────────
@@ -249,7 +254,7 @@ let
   mkApp = x:
     let inherit (x) entry w; in
     {
-      inherit (w) namespace createNamespace project exposure scaling;
+      inherit (w) namespace createNamespace project exposure scaling adopt;
       image = imageOf entry w;
       ports = portsOf entry;
       state = stateOf entry w;
@@ -686,6 +691,32 @@ let
         rather than an option nobody can find — and there is deliberately no `wake` term beside it,
         because a wake front for a workload that may not sleep would be an answer to a question this
         catalogue never asks.
+      '';
+    };
+
+    adopt = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Whether this workload's Application TAKES OVER objects that already exist in the cluster,
+        rather than creating them. Passed straight through to the app grammar, which renders the
+        Application with server-side apply and server-side diff so Argo CD compares against what the
+        API server actually holds instead of against a client-side reconstruction of it.
+
+        IT IS A DECLARATION TERM AND NOT A CATALOGUE ONE, and the reason is worth stating: whether an
+        object already exists is that CLUSTER'S HISTORY, not a fact about the software. The same
+        server, at the same version, out of the same catalogue entry, is adopted on the cluster that
+        has run it for years and created fresh on the one standing up beside it — and it differs here
+        and nowhere else.
+
+        WHY IT MATTERS MORE HERE THAN ELSEWHERE. Both servers this repository catalogues declare
+        durable state, which forces `Recreate`: the old pod is gone before the new one answers. A
+        rendered spec is never byte-identical to the hand-written YAML it replaces, so a first sync
+        without this is a diff, and a diff is an outage — chat down, inbound federation dropped. It
+        does not make the diff zero. Render it, diff it against what is live, and decide knowingly.
+
+        Defaults to false, matching the grammar: a greenfield declaration creates its objects and
+        nothing about its Application changes for anyone who never writes this down.
       '';
     };
 

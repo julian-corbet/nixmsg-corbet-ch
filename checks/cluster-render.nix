@@ -37,6 +37,16 @@ pkgs.runCommand "nixmsg-cluster-render"
   check "chat port" "8065" "$(y '.spec.template.spec.containers[0].ports[0].containerPort' $chatd)"
   check "homeserver ports" "8008 8448" "$(y '[.spec.template.spec.containers[0].ports[].containerPort] | join(" ")' $homed)"
 
+  # THE NEGATIVE HALF of the adoption term, and it has to be asserted somewhere: `adopt` renders
+  # server-side apply and diff onto the Application, and a translator that leaked it onto every
+  # workload would still pass the adopted surface's check. Greenfield objects do not exist yet, so
+  # there is nothing to take over and nothing here may say otherwise.
+  echo "== nothing is adopted here, so no Application asks to take anything over =="
+  for a in $manifests/apps/Application-example-team-chat.yaml $manifests/apps/Application-example-homeserver.yaml; do
+    check "$(basename $a) no server-side apply" "null" "$(y '.spec.syncPolicy.syncOptions' $a)"
+    check "$(basename $a) no server-side diff" "null" "$(y '.metadata.annotations' $a)"
+  done
+
   echo "== a messaging server is a single writer, so neither Deployment may roll =="
   check "chat strategy" "Recreate" "$(y '.spec.strategy.type' $chatd)"
   check "homeserver strategy" "Recreate" "$(y '.spec.strategy.type' $homed)"

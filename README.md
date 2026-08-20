@@ -98,7 +98,7 @@ nixmsg.servers.chat = {
 };
 ```
 
-### The five things only a deployment can answer
+### The six things only a deployment can answer
 
 Each of these looks at first like something a catalogue ought to know, and none of them is. They
 exist because a workload that already runs has to be re-declarable in this vocabulary **without the
@@ -113,6 +113,7 @@ federation for a homeserver.
 | `state.<name>.path` | where a projected credential lands | the software's requirement is that ONE named variable carry the file's path, not that the path be any particular string. The module renders that variable FROM the mount, so the location is written down exactly once |
 | `state.<name>.volumeName`, `prestart.*.name` | what things are CALLED in a live pod | a volume name and a container name are part of the pod template rather than labels on it |
 | `prestart.prepare.<name>.mountPath`, `prestart.databaseWait.notice` | what the helper steps do inside their own image | the helper image is the deployment's choice, so the path it mounts the tree at and the line it prints while waiting are the deployment's too |
+| `adopt` | whether these objects are already THERE | whether an object exists is that cluster's history, not a property of the software: the same server is adopted on the cluster that has run it for years and created fresh on the one standing up beside it. Set, the Application is rendered with server-side apply and diff, so Argo compares against what the API server holds rather than against a client-side reconstruction of it |
 
 WHETHER each of those happens at all still belongs to the catalogue: that a tree must be prepared,
 that an engine must be waited for, that a credential arrives as a file, that this server is probed.

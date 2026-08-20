@@ -33,6 +33,19 @@ pkgs.runCommand "nixmsg-cluster-adopted"
 
   chatd="$manifests/example-chat/Deployment-example-chat.yaml"
   homed="$manifests/example-home/Deployment-example-home.yaml"
+  chata="$manifests/apps/Application-example-chat.yaml"
+  homea="$manifests/apps/Application-example-home.yaml"
+
+  # THE ONE ASSERTION HERE THAT IS NOT ABOUT THE POD. Everything else below proves the pod template
+  # did not move; this proves the Application is allowed to take the object over at all. Without
+  # server-side apply and diff Argo compares a client-side reconstruction against what is live, sees
+  # a diff neither side asked for, and syncs it — which for these two workloads is `Recreate`, and
+  # `Recreate` is the outage the whole file exists to avoid.
+  echo "== an adopted workload takes objects over: server-side apply, server-side diff =="
+  check "chat SSA" "ServerSideApply=true" "$(y '.spec.syncPolicy.syncOptions[0]' $chata)"
+  check "chat SSD" "ServerSideDiff=true" "$(y '.metadata.annotations."argocd.argoproj.io/compare-options"' $chata)"
+  check "homeserver SSA" "ServerSideApply=true" "$(y '.spec.syncPolicy.syncOptions[0]' $homea)"
+  check "homeserver SSD" "ServerSideDiff=true" "$(y '.metadata.annotations."argocd.argoproj.io/compare-options"' $homea)"
 
   echo "== the steps that run first keep the names the live pod holds, in the order they ran =="
   check "init order" "fix-perms wait-for-db" "$(y '[.spec.template.spec.initContainers[].name] | join(" ")' $chatd)"

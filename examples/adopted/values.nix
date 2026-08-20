@@ -18,7 +18,7 @@
 # a stand-in; no real cluster, address or credential appears in any form. What is real is the SHAPE:
 # each of these is a value some live object genuinely holds and no catalogue could have guessed.
 #
-# The five deployment-side answers, one at a time:
+# The six deployment-side answers, one at a time:
 #
 #   1. the steps that run first are CALLED what the live pod calls them (`prestart.*.name`), and the
 #      ownership fix walks the path that pod's helper mounts (`prestart.prepare.<name>.mountPath`);
@@ -27,7 +27,12 @@
 #      volume keeps the name it was born with (`state.<name>.volumeName`);
 #   4. the hardware share is this cluster's (`resources`);
 #   5. the probe's patience is this cluster's disk (`probeBudget`) — while its shape stays the
-#      catalogue's, because which endpoint answers is not a cluster's opinion.
+#      catalogue's, because which endpoint answers is not a cluster's opinion;
+#   6. and the frame around all five: `adopt`, which says these objects ARE ALREADY THERE, so the
+#      Application takes them over with server-side apply and diff instead of applying a
+#      client-side reconstruction over them. It is the one term here that is not about the pod at
+#      all — it is about this cluster's history, which is why the greenfield surface leaves it
+#      false and this one sets it on both.
 {
   nixidy.target.repository = "https://example.com/example-org/example-gitops.git";
   nixidy.target.branch = "main";
@@ -42,6 +47,10 @@
     namespace = "example-chat";
     createNamespace = true;
     exposure = "public";
+
+    # The Deployment, the Service and the Namespace all pre-date this declaration. Take them over
+    # rather than apply over them.
+    adopt = true;
 
     helperImage = "registry.example.com/example-org/example-tools:0.0.0@sha256:1111111111111111111111111111111111111111111111111111111111111111";
     database = { host = "example-engine"; port = 5432; };
@@ -86,6 +95,7 @@
     namespace = "example-federation";
     createNamespace = true;
     exposure = "public";
+    adopt = true;
 
     state.database.hostPath = "/example/state/homeserver/database";
 
