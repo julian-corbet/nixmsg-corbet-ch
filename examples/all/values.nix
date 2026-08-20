@@ -84,6 +84,9 @@
     state.ldap-password = {
       secret = "example-homeserver-secrets";
       key = "example-bind-password";
+      # WHERE the file lands, which the catalogue deliberately does not decide. The variable the
+      # server reads it from is rendered from this value rather than written beside it.
+      path = "/run/secrets/example-bind-password";
     };
 
     secrets.example-homeserver-secrets.env.TUWUNEL_REGISTRATION_TOKEN = "example-registration-token";

@@ -102,6 +102,17 @@
             clusterModule = self.nixidyModules.nixmsg;
             values = ./examples/all/values.nix;
           };
+
+          # The OTHER surface, and the one that decides whether this vocabulary can be adopted at
+          # all: the same two servers declared against objects that already exist, where every name
+          # the live pod holds and every number that cluster chose has to survive the translation.
+          cluster-adopted = import ./checks/cluster-adopted.nix {
+            inherit pkgs nixidy;
+            lib = nixpkgs.lib;
+            appsModule = nixk3s.nixidyModules.apps;
+            clusterModule = self.nixidyModules.nixmsg;
+            values = ./examples/adopted/values.nix;
+          };
         });
 
       formatter = forAllSystems (system: (pkgsFor system).nixpkgs-fmt);

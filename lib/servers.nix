@@ -21,11 +21,25 @@
 #
 # Everything in this file is true of the software wherever anyone runs it: the port it listens on,
 # the directories it writes, whether it can be told to sleep, whether it can create its own state,
-# how patient a probe must be before it is calling a slow start a failure. Nothing here names an
-# address, a node, a hostname, a namespace, a uid or a secret — those are one deployment's facts and
-# they arrive from a declaration. The split is enforced rather than trusted: `state` here says WHERE
-# inside the container a directory lives and what KIND of thing may back it, and only a declaration
-# can say WHAT actually does.
+# the SHAPE of the probe that decides whether it is up. Nothing here names an address, a node, a
+# hostname, a namespace, a uid or a secret — those are one deployment's facts and they arrive from a
+# declaration. The split is enforced rather than trusted: `state` here says WHERE inside the
+# container a durable directory lives and what KIND of thing may back it, and only a declaration can
+# say WHAT actually does.
+#
+# THREE THINGS THAT LOOK LIKE KNOWLEDGE AND ARE NOT, named here so the reader does not go looking
+# for them below:
+#
+#   - HOW MUCH CPU AND MEMORY. A request is a claim on one cluster's hardware, next to whatever else
+#     that cluster runs; the same software is right at very different numbers on a laptop-sized node
+#     and on a real one. It is a declaration's, and this file carries none.
+#   - THE PROBE'S BUDGET. WHICH endpoint answers, and whether the software should be probed at all,
+#     is knowledge and is here. How many seconds a cold start may take before that endpoint not
+#     answering counts as a failure is a fact about the disk underneath it, so the numbers below are
+#     a starting point a declaration may retune — and may not invent where there is no probe.
+#   - WHERE A PROJECTED CREDENTIAL LANDS. That the software reads a password out of a FILE, and that
+#     one named variable has to carry that file's path, is knowledge. The path itself is a
+#     container-layout choice; see `state.ldap-password` below.
 #
 # ── THE DOMAIN'S ONE SHARED FACT: NOTHING HERE MAY IDLE ────────────────────────────────────────
 #
@@ -161,10 +175,16 @@
       requiredEnv = [ "TUWUNEL_SERVER_NAME" ];
 
       # Only what this catalogue itself decides. The database path is the directory `state` backs;
-      # the port is the number `ports.client` declares; the bind-password path is the file `state`
-      # projects. Everything else — the server name, the delegation targets, the directory it
-      # authenticates against, whether registration is open — is one deployment's policy and arrives
-      # from the declaration.
+      # the port is the number `ports.client` declares. Everything else — the server name, the
+      # delegation targets, the directory it authenticates against, whether registration is open —
+      # is one deployment's policy and arrives from the declaration.
+      #
+      # THE BIND-PASSWORD PATH IS NOT HERE and used to be. It named a file at a path this catalogue
+      # picked, which is a guess at somebody else's filesystem layout: the software's actual
+      # requirement is that ONE variable carry the path the file is mounted at, not that the path be
+      # any particular string. That requirement is recorded as `pathEnv` on the volume below and the
+      # module derives the variable from the mount, so the two can no longer be written down twice
+      # and disagree.
       #
       # `["0.0.0.0"]` is a bind-any address: a fact about a container rather than about a network,
       # which is why it is knowledge and a routable address would not be.
@@ -172,7 +192,6 @@
         TUWUNEL_DATABASE_PATH = "/var/lib/tuwunel";
         TUWUNEL_ADDRESS = ''["0.0.0.0"]'';
         TUWUNEL_PORT = "8008";
-        TUWUNEL_LDAP__BIND_PASSWORD_FILE = "/run/secrets/ldap-bind-password";
       };
 
       args = [ ];
@@ -192,20 +211,23 @@
       };
 
       # A SECRET CONSUMED AS A FILE, which is a different noun from a secret consumed as an
-      # environment variable and gets a different term here. The LDAP bind password is read from the
-      # PATH named in `TUWUNEL_LDAP__BIND_PASSWORD_FILE` above, so what the software needs is a file
-      # at that exact path — not a directory, which is what mounting a whole Secret at it would
-      # produce, and which fails as an LDAP bind rather than as a mount error.
+      # environment variable and gets a different term here. The LDAP bind password is read from a
+      # PATH the server is told, so what the software needs is a FILE at that exact path — not a
+      # directory, which is what mounting a whole Secret at it would produce, and which fails as an
+      # LDAP bind rather than as a mount error.
       #
-      # The mount therefore projects ONE key under this filename and lands it with a subPath. WHICH
-      # key of WHICH Secret is a deployment's fact and arrives from the declaration; the filename is
-      # container-internal and is decided here, once, so that the environment variable above can be
-      # decided here too.
+      # WHAT IS KNOWLEDGE HERE IS THE COUPLING, NOT THE PATH. That the file's location has to be
+      # handed to the process in `TUWUNEL_LDAP__BIND_PASSWORD_FILE` is true of this software
+      # everywhere, so `pathEnv` names that variable and the module renders it FROM the mount. WHICH
+      # path — and therefore which filename the key is projected under — is one deployment's choice,
+      # is not written here, and is refused unless a declaration answers it. That is also why this
+      # entry catalogues no `mounts`: a path this file picked would be this file guessing at
+      # somebody's container layout, and the guess would then be told to the software as fact.
       state.ldap-password = {
         backing = "secret";
         prepare = false;
         readOnly = true;
-        mounts = [{ mountPath = "/run/secrets/ldap-bind-password"; subPath = "ldap-bind-password"; }];
+        pathEnv = "TUWUNEL_LDAP__BIND_PASSWORD_FILE";
       };
 
       # NO PROBE, DELIBERATELY. A homeserver opens a multi-hundred-megabyte RocksDB before it
@@ -237,7 +259,8 @@
         argument for a digest pin that team chat makes, for the same reason.
 
         TWO SECRET THINGS, CONSUMED TWO WAYS. A registration token is an environment variable; the
-        directory bind password is a file. This catalogue names neither and can carry neither.
+        directory bind password is a file. This catalogue names neither, carries neither, and does
+        not decide where the file lands either — only that the process must be told where it did.
 
         A DISAGREEMENT LEFT UNRESOLVED. The recipe this entry was mined from declares an HTTP
         readiness probe on `/`; the deployment it was mined from deliberately has none. The

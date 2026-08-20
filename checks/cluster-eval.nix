@@ -97,10 +97,14 @@ let
       chat.state.data.hostPathType == "Directory"
       && home.state.database.hostPathType == "Directory";
 
-    "a secret-backed volume projects the ONE key the declaration named, under the filename the catalogue chose" =
-      home.state.ldap-password.items == { example-bind-password = "ldap-bind-password"; }
+    "a secret-backed volume projects the ONE key the declaration named, under the filename its path ends in" =
+      home.state.ldap-password.items == { example-bind-password = "example-bind-password"; }
       && home.state.ldap-password.secret == "example-homeserver-secrets"
       && home.state.ldap-password.readOnly;
+
+    "the filename is the path's basename rather than a second answer to the same question" =
+      (lib.head home.state.ldap-password.mounts).subPath
+      == baseNameOf (lib.head home.state.ldap-password.mounts).mountPath;
 
     "a Secret is named and never carried, in both consumption forms" =
       chat.secrets.example-team-chat-env.envFrom
@@ -119,9 +123,14 @@ let
     "the homeserver is told to listen on the port the catalogue actually declares" =
       servers.tuwunel.env.TUWUNEL_PORT == toString servers.tuwunel.ports.client;
 
-    "the homeserver is told to read its bind password from the file the catalogue actually projects" =
-      servers.tuwunel.env.TUWUNEL_LDAP__BIND_PASSWORD_FILE
-      == (lib.head servers.tuwunel.state.ldap-password.mounts).mountPath;
+    "the catalogue names the variable the bind password's path must arrive in, and no path of its own" =
+      servers.tuwunel.state.ldap-password.pathEnv == "TUWUNEL_LDAP__BIND_PASSWORD_FILE"
+      && !(servers.tuwunel.env ? TUWUNEL_LDAP__BIND_PASSWORD_FILE)
+      && !(servers.tuwunel.state.ldap-password ? mounts);
+
+    "the path a declaration chose is the path the server is told about, from one value not two" =
+      home.env.TUWUNEL_LDAP__BIND_PASSWORD_FILE == "/run/secrets/example-bind-password"
+      && (lib.head home.state.ldap-password.mounts).mountPath == "/run/secrets/example-bind-password";
 
     # ── What has to happen before the process starts ──────────────────────────────────────────
     "preparation and waiting are rendered in that order, and only for the server that needs them" =
@@ -139,6 +148,49 @@ let
 
     "a server the catalogue gives no probe gets none invented for it" =
       home.probes.readiness == null;
+
+    "a deployment may retune the budget and may not touch the shape" =
+      let
+        retuned = (mkEnv (with' {
+          nixmsg.servers.example-team-chat.probeBudget = {
+            failureThreshold = 30;
+            timeoutSeconds = 3;
+          };
+        })).config.nixk3s.apps.example-team-chat.probes.readiness;
+      in
+      retuned.failureThreshold == 30
+      && retuned.timeoutSeconds == 3
+      && retuned.periodSeconds == 10
+      && retuned.path == "/api/v4/system/ping"
+      && retuned.port == "http";
+
+    # ── What one cluster gives it, which is nothing until somebody says ──────────────────────
+    # The grammar's own term is always present with empty halves; what matters is that nothing
+    # this module wrote put anything in them, which is what the render check reads back as an
+    # absent `resources:` block on both containers.
+    "a hardware budget nobody declared puts nothing in either half" =
+      chat.resources.requests == { } && chat.resources.limits == { }
+      && home.resources.requests == { } && home.resources.limits == { };
+
+    "each half is rendered only where it was answered" =
+      let
+        sized = (mkEnv (with' {
+          nixmsg.servers.example-team-chat.resources = {
+            cpuRequest = "200m";
+            memoryRequest = "512Mi";
+            memoryLimit = "2Gi";
+          };
+        })).config.nixk3s.apps.example-team-chat.resources;
+      in
+      sized.requests == { cpu = "200m"; memory = "512Mi"; }
+      && sized.limits == { memory = "2Gi"; };
+
+    "a quantity the API server would reject is not a value this option has" =
+      !renders (with' { nixmsg.servers.example-team-chat.resources.memoryRequest = "512 Mi"; });
+
+    "the resource surface is four named scalars, so nothing declared here can ask for a card" =
+      lib.sort (a: b: a < b) (lib.attrNames goodCfg.nixmsg.servers.example-team-chat.resources)
+      == [ "cpuLimit" "cpuRequest" "memoryLimit" "memoryRequest" ];
 
     # ── Unwritable, not merely refused ────────────────────────────────────────────────────────
     "a server the catalogue does not hold is not a value this option has" =
@@ -215,6 +267,48 @@ let
     "two workloads on one slot is refused" =
       failsWith "is claimed by 2 servers"
         (with' { nixmsg.servers.example-homeserver.slot = 40; });
+
+    # ── The guards on what only a deployment can answer ───────────────────────────────────────
+    "a projected credential with nowhere to land is refused rather than defaulted" =
+      failsWith "does not say WHERE the file lands"
+        (lib.recursiveUpdate base {
+          nixmsg.servers.example-homeserver.state.ldap-password = lib.mkForce {
+            secret = "example-homeserver-secrets";
+            key = "example-bind-password";
+          };
+        });
+
+    "a relative path for a projected credential is refused -- the kubelet reads it as neither" =
+      failsWith "does not say WHERE the file lands"
+        (with' { nixmsg.servers.example-homeserver.state.ldap-password.path = "run/secrets/x"; });
+
+    "writing the path variable a second time, beside the mount, is refused" =
+      failsWith "not a declaration's to write"
+        (with' {
+          nixmsg.servers.example-homeserver.env.TUWUNEL_LDAP__BIND_PASSWORD_FILE = "/run/secrets/elsewhere";
+        });
+
+    "two volumes rendered under one name is refused" =
+      failsWith "two volumes under one name"
+        (with' { nixmsg.servers.example-homeserver.state.ldap-password.volumeName = "database"; });
+
+    "naming a preparation step for a directory the catalogue does not prepare is refused" =
+      failsWith "does not say has to be prepared"
+        (with' { nixmsg.servers.example-team-chat.prestart.prepare.nonesuch.name = "example-step"; });
+
+    "two pre-start steps under one name is refused" =
+      failsWith "under one name"
+        (with' {
+          nixmsg.servers.example-team-chat.prestart.prepare.data.name = "example-step";
+          nixmsg.servers.example-team-chat.prestart.databaseWait.name = "example-step";
+        });
+
+    "a probe budget for a server the catalogue probes not at all is refused, not promoted into a probe" =
+      failsWith "the catalogue gives it no probe"
+        (with' { nixmsg.servers.example-homeserver.probeBudget.failureThreshold = 30; });
+
+    "a wait notice with a space in it is not a value this option has -- it is echoed unquoted" =
+      !renders (with' { nixmsg.servers.example-team-chat.prestart.databaseWait.notice = "waiting for it"; });
 
     # ── The warning that is not a refusal ─────────────────────────────────────────────────────
     # A preparation step inherits the pod's identity, so as declared it cannot chown a tree owned by

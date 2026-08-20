@@ -27,6 +27,27 @@
 # database backed by a Secret, a password file backed by a node path — is an eval error rather than
 # a workload that starts and behaves strangely.
 #
+# THE FIVE QUESTIONS ONLY A DECLARATION CAN ANSWER, listed once here because each of them looks at
+# first like something a catalogue ought to know:
+#
+#   1. HOW MUCH CPU AND MEMORY (`resources`). A request is a claim on one cluster's hardware next to
+#      whatever else it runs.
+#   2. HOW PATIENT THE PROBE IS (`probeBudget`). The catalogue decides the probe's shape — which
+#      endpoint, which port, whether to probe at all — and a budget is a fact about a disk.
+#   3. WHERE A PROJECTED CREDENTIAL LANDS (`state.<name>.path`). The software's requirement is that
+#      one named variable carry the file's path, not that the path be any particular string; the
+#      module renders the variable FROM the mount so the two cannot disagree.
+#   4. WHAT THINGS ARE CALLED IN A LIVE POD (`state.<name>.volumeName`, `prestart.*.name`). A volume
+#      name and a container name are part of the pod template rather than labels on it, so a workload
+#      adopted from an object that already exists has to be able to keep the names it has — renaming
+#      one is a new template hash, which for these servers is an outage rather than a rename.
+#   5. WHAT THE HELPER STEPS DO INSIDE THEIR OWN IMAGE (`prestart.prepare.<name>.mountPath`,
+#      `prestart.databaseWait.notice`). The helper image is the deployment's choice, so the paths and
+#      the log line inside it are too.
+#
+# None of the five is a passthrough of a nested attrset: each is a named scalar the module reads and
+# renders somewhere specific, and the catalogue still decides WHETHER each thing happens at all.
+#
 # ── WHY THERE IS NO SHARED NAMESPACE DEFAULT ───────────────────────────────────────────────────
 #
 # The sibling repository this module's shape is copied from defaults every workload into one
@@ -52,10 +73,33 @@ let
 
   portsOf = entry: lib.mapAttrs (_: number: { inherit number; }) entry.ports;
 
-  # The filename a secret-backed volume projects, which is the basename the catalogue chose when it
-  # decided the path the software reads. Taken from the mount rather than restated, so the two
-  # cannot drift apart into a subPath that names a file the volume does not carry.
-  projectedFileOf = spec: (lib.head spec.mounts).subPath;
+  # THE NAME THE VOLUME CARRIES IN THE RENDERED POD. The catalogue's key for it by default, which is
+  # what a workload declared from scratch wants and what keeps the two names from drifting. A
+  # workload ADOPTED from an object that already exists overrides it, because a volume name is part
+  # of the pod template: renaming one is not a rename, it is a new template hash and therefore a
+  # restart of a server that stops before it starts again.
+  volumeNameOf = key: backing: if backing.volumeName != null then backing.volumeName else key;
+
+  # WHERE THE MOUNTS GO. For durable state the catalogue knows every path, because those paths are
+  # the image's own and an image does not change its mind about them. For a projected credential it
+  # knows none of them: a declaration says where the file lands, and the filename the key is
+  # projected under is that path's BASENAME rather than a second answer to the same question — two
+  # spellings of one path is exactly where a mount and a subPath disagree and the software reads a
+  # directory where it expected a file.
+  mountsOf = spec: backing:
+    if spec.backing == "secret"
+    then [{ mountPath = backing.path; subPath = baseNameOf backing.path; }]
+    else spec.mounts;
+
+  # The names of the steps that run before the process does, when a declaration does not rename
+  # them. Written once here because both the option's own default and the fallback for a step no
+  # declaration mentions have to be the same string, and two literals is where they stop being.
+  defaultPrepareName = key: "prepare-${key}";
+  defaultPrepareMountPath = "/state";
+  prepareStepOf = w: key:
+    if w.prestart.prepare ? ${key}
+    then w.prestart.prepare.${key}
+    else { name = defaultPrepareName key; mountPath = defaultPrepareMountPath; };
 
   # THE SPLIT IN ONE FUNCTION: WHERE inside the container, and WHAT KIND of thing may back it, come
   # from the catalogue; WHAT ACTUALLY BACKS IT comes from the declaration.
@@ -71,21 +115,24 @@ let
   catalogued = entry: w: lib.filterAttrs (key: _: entry.state ? ${key}) w.state;
 
   stateOf = entry: w:
-    lib.mapAttrs
+    lib.mapAttrs'
       (key: backing:
         let spec = entry.state.${key}; in
-        { inherit (spec) mounts readOnly; }
-        // (if spec.backing == "secret"
-        then
-          lib.optionalAttrs (backing.secret != null)
-            {
-              secret = backing.secret;
-              items = { ${backing.key} = projectedFileOf spec; };
-            }
-        else
-          { inherit (backing) claim hostPath; }
-          // lib.optionalAttrs (backing.hostPath != null) { hostPathType = "Directory"; }
-          // lib.optionalAttrs (spec.prepare && backing.claim != null) { ownership = "kubelet"; }))
+        lib.nameValuePair (volumeNameOf key backing) (
+          { inherit (spec) readOnly; }
+          // (if spec.backing == "secret"
+          then
+            lib.optionalAttrs (backing.secret != null && backing.key != null && backing.path != null)
+              {
+                mounts = mountsOf spec backing;
+                secret = backing.secret;
+                items = { ${backing.key} = baseNameOf backing.path; };
+              }
+          else
+            { inherit (backing) claim hostPath; inherit (spec) mounts; }
+            // lib.optionalAttrs (backing.hostPath != null) { hostPathType = "Directory"; }
+            // lib.optionalAttrs (spec.prepare && backing.claim != null) { ownership = "kubelet"; })
+        ))
       (catalogued entry w);
 
   # Node paths this workload writes that the software cannot take ownership of, and that a
@@ -108,24 +155,27 @@ let
   initOf = entry: w:
     lib.optionals (w.helperImage != null) (
       lib.mapAttrsToList
-        (key: backing: {
-          name = "prepare-${key}";
-          image = w.helperImage;
-          command = [
-            "sh"
-            "-c"
-            "chown -R ${toString backing.owner.uid}:${toString backing.owner.gid} /state"
-          ];
-          mounts.${key} = [{ mountPath = "/state"; }];
-        })
+        (key: backing:
+          let step = prepareStepOf w key; in
+          {
+            inherit (step) name;
+            image = w.helperImage;
+            command = [
+              "sh"
+              "-c"
+              "chown -R ${toString backing.owner.uid}:${toString backing.owner.gid} ${step.mountPath}"
+            ];
+            mounts.${volumeNameOf key backing} = [{ inherit (step) mountPath; }];
+          })
         (preparedPaths entry w)
       ++ lib.optional (entry.externalDatabase && w.database != null) {
-        name = "wait-for-database";
+        inherit (w.prestart.databaseWait) name;
         image = w.helperImage;
         command = [
           "sh"
           "-c"
-          "until nc -z ${w.database.host} ${toString w.database.port}; do echo waiting-for-database; sleep 2; done"
+          ("until nc -z ${w.database.host} ${toString w.database.port}; "
+          + "do echo ${w.prestart.databaseWait.notice}; sleep 2; done")
         ];
       }
     );
@@ -141,16 +191,50 @@ let
       })
       w.secrets;
 
-  envOf = entry: w: entry.env // w.env;
+  # VARIABLES THE MODULE DERIVES RATHER THAN TAKES. For every projected credential whose catalogue
+  # entry names the variable that must carry its path, that variable IS the mount path — computed
+  # from the same value the volume is mounted at rather than written down a second time. A file
+  # mounted at one path and a process told about another is an authentication failure with nothing
+  # visibly wrong in the manifest, and it is the exact failure two independent strings produce.
+  pathEnvOf = entry: w:
+    lib.listToAttrs (lib.concatMap
+      (key:
+        let spec = entry.state.${key}; in
+        lib.optional (spec ? pathEnv && w.state.${key}.path != null)
+          (lib.nameValuePair spec.pathEnv w.state.${key}.path))
+      (lib.attrNames (catalogued entry w)));
+
+  envOf = entry: w: entry.env // w.env // pathEnvOf entry w;
+
+  # ONE CLUSTER'S SHARE OF ITS HARDWARE. Four named scalars rather than the schema's free-form
+  # quantity map, and the narrowness is the point: nothing this repository catalogues burns a GPU or
+  # any other extended resource, so a surface that could ask for one would be a surface that lets a
+  # chat server claim a card. What is left is what a messaging server actually competes for.
+  resourcesOf = w:
+    let
+      drop = lib.filterAttrs (_: v: v != null);
+      requests = drop { cpu = w.resources.cpuRequest; memory = w.resources.memoryRequest; };
+      limits = drop { cpu = w.resources.cpuLimit; memory = w.resources.memoryLimit; };
+    in
+    lib.optionalAttrs (requests != { }) { inherit requests; }
+    // lib.optionalAttrs (limits != { }) { inherit limits; };
 
   # Variable names this workload supplies from individual Secret keys. A required variable satisfied
   # this way is satisfied: what the software needs is the variable, not a particular way of getting
   # its value into the process.
   secretEnvNames = w: lib.concatMap (s: lib.attrNames s.env) (lib.attrValues w.secrets);
 
-  probesOf = entry:
+  # THE SHAPE IS THE CATALOGUE'S, THE BUDGET MAY BE A DEPLOYMENT'S. Which endpoint answers, on which
+  # port, and whether this software should be probed at all, is knowledge and comes from the entry.
+  # How many seconds a cold start may take before that endpoint not answering counts as a failure is
+  # a fact about the disk underneath it, so the entry's numbers are a starting point and a
+  # declaration may retune them — on a probe that exists. It may not add one where the catalogue
+  # deliberately has none; see the guard.
+  probesOf = entry: w:
     lib.optionalAttrs (entry.readiness != null) {
-      readiness = { port = entry.primaryPort; } // entry.readiness;
+      readiness = { port = entry.primaryPort; }
+        // entry.readiness
+        // lib.filterAttrs (_: v: v != null) w.probeBudget;
     };
 
   # Handed to the band model only when the consumer says it is part of the render: `origin` and
@@ -172,7 +256,8 @@ let
       secrets = secretsOf w;
       env = envOf entry w;
       args = entry.args ++ w.args;
-      probes = probesOf entry;
+      probes = probesOf entry w;
+      resources = resourcesOf w;
       init = initOf entry w;
     }
     // lib.optionalAttrs (w.identity != null) { inherit (w) identity; }
@@ -182,9 +267,12 @@ let
 
   # The catalogue checking itself. Every other guard here reads a declaration against the catalogue;
   # this one reads the catalogue against the model, so that an entry which cannot be translated is
-  # caught where it is written rather than by whoever first declares it. A secret-backed volume whose
-  # single mount has no subPath is the specific failure: the projection and the mount would then
-  # disagree about the filename, and the software would find a directory where it expected a file.
+  # caught where it is written rather than by whoever first declares it.
+  #
+  # A SECRET-BACKED VOLUME IS THE CASE WITH TWO WAYS TO BE WRONG. It must name the variable that
+  # carries its path (`pathEnv`), because a credential the process is never told the location of is
+  # a mount nothing reads; and it must catalogue no `mounts`, because a path written here is this
+  # file guessing at somebody's container layout and then telling the software that guess as fact.
   catalogueAssertions = lib.concatMap
     (x:
       let inherit (x) entry w; in
@@ -192,12 +280,12 @@ let
         (key: spec: {
           assertion =
             spec.backing != "secret"
-            || (lib.length spec.mounts == 1 && (lib.head spec.mounts).subPath != null);
+            || ((spec.pathEnv or null) != null && (spec.mounts or [ ]) == [ ]);
           message =
-            "nixmsg: catalogue entry `${w.app}` declares `state.${key}` as secret-backed, and a "
-            + "secret-backed volume must have exactly ONE mount carrying a subPath. The subPath is the "
-            + "filename the key is projected under; without it the mount covers a directory and the "
-            + "software reads a directory where it expects a file.";
+            "nixmsg: catalogue entry `${w.app}` declares `state.${key}` as secret-backed, so it must name "
+            + "the variable that carries the file's path (`pathEnv`) and must catalogue no mount of its "
+            + "own. WHERE a projected credential lands is a deployment's choice; the catalogue's only "
+            + "stake in it is that the process be told the same path the file was mounted at.";
         })
         entry.state)
     workloads;
@@ -270,6 +358,93 @@ let
             + "`fsGroup` is not applied to one at all, so nothing else will fix it — the process starts, "
             + "cannot create its own files, and fails in a way that reads as a bad command rather than a "
             + "permission denial.";
+        }
+
+        {
+          # A projected credential with no path is a Secret mounted nowhere, and the software still
+          # gets told a variable pointing at it — because the module derives that variable FROM the
+          # path. There is nothing to derive, so this is refused rather than defaulted: any default
+          # would be this repository picking a filesystem layout inside somebody else's container.
+          assertion = lib.all
+            (key:
+              let backing = w.state.${key}; in
+              (entry.state.${key}).backing != "secret"
+              || (backing.path != null && lib.hasPrefix "/" backing.path && backing.path != "/"))
+            (lib.attrNames (catalogued entry w));
+          message =
+            "nixmsg: server `${name}` projects a credential out of a Secret and does not say WHERE the "
+            + "file lands, or says it with something that is not an absolute path to a file. The catalogue "
+            + "cannot answer this one: it knows the process must be told the path, not which path a "
+            + "particular container layout has room for.";
+        }
+
+        {
+          # TWO DEFINERS OF ONE PATH IS WHERE THEY DISAGREE. The module writes the path variable from
+          # the mount; a declaration that also writes it is declaring a second answer that silently
+          # loses, and the loss is invisible because both spellings look correct in isolation.
+          assertion = lib.all
+            (key:
+              let spec = entry.state.${key}; in
+              !(spec ? pathEnv) || !(w.env ? ${spec.pathEnv}))
+            (lib.attrNames (catalogued entry w));
+          message =
+            "nixmsg: server `${name}` sets an environment variable that names a projected credential's "
+            + "path, and that variable is not a declaration's to write — the module renders it from the "
+            + "mount so the file's location is stated exactly once. Move the value to `state.<name>.path`.";
+        }
+
+        {
+          # A volume name is an identifier in the pod template. Two volumes on one name is not a
+          # merge, it is one of them silently not existing.
+          assertion =
+            let names = lib.mapAttrsToList volumeNameOf (catalogued entry w); in
+            lib.length (lib.unique names) == lib.length names;
+          message =
+            "nixmsg: server `${name}` renders two volumes under one name. A volume name is an identifier "
+            + "inside the pod, not a label: the second definition does not merge with the first, it "
+            + "replaces it, and one of the directories this server writes then does not exist.";
+        }
+      ])
+    workloads;
+
+  # ── The steps that run before the process, and the numbers a deployment tunes ─────────────────
+  deploymentAssertions = lib.concatMap
+    (x:
+      let inherit (x) name w entry; in
+      [
+        {
+          assertion = lib.all (key: (entry.state ? ${key}) && (entry.state.${key}).prepare)
+            (lib.attrNames w.prestart.prepare);
+          message =
+            "nixmsg: server `${name}` names a preparation step for a directory the catalogue does not say "
+            + "has to be prepared. The catalogue decides THAT a tree needs preparing — because the image "
+            + "cannot take ownership of one it is handed — and a step named for anything else is a step "
+            + "that would never be rendered, which is a typo rather than a declaration.";
+        }
+
+        {
+          assertion =
+            let names = map (i: i.name) (initOf entry w); in
+            lib.length (lib.unique names) == lib.length names;
+          message =
+            "nixmsg: server `${name}` runs two pre-start steps under one name. The kubelet keys init "
+            + "containers by name and so does every overlay written against them, so two of one name is "
+            + "one step that runs and one that quietly does not.";
+        }
+
+        {
+          # A budget is a retuning of a probe, never the invention of one. The catalogue says `null`
+          # where it does not know how long a cold start takes, and guessing low there is a restart
+          # loop on a database that was merely slow to open — the exact failure the null exists to
+          # avoid. So a budget with no probe under it is refused rather than quietly ignored.
+          assertion =
+            entry.readiness != null
+            || lib.all (v: v == null) (lib.attrValues w.probeBudget);
+          message =
+            "nixmsg: server `${name}` is given a probe budget and the catalogue gives it no probe. The "
+            + "numbers retune a probe whose SHAPE the catalogue decided; they cannot conjure one where it "
+            + "deliberately declined to guess, and a probe budget nobody has watched a cold start against "
+            + "is how a slow-opening database becomes a restart loop that reads as the software failing.";
         }
       ])
     workloads;
@@ -413,6 +588,37 @@ let
       };
     };
   };
+
+  # A Kubernetes quantity, spelled the way the API server spells one. Not `str`: "512 Mi", "2GB" and
+  # "0,5" are all rejected by the API server at apply time, which is after a commit, after a render
+  # and after a sync — and a request the scheduler never saw is an app placed as if it were free.
+  quantityType = lib.types.strMatching "[0-9]+(\\.[0-9]+)?(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?";
+
+  prepareStepType = lib.types.submodule ({ name, ... }: {
+    options = {
+      name = lib.mkOption {
+        type = lib.types.str;
+        default = defaultPrepareName name;
+        defaultText = lib.literalExpression ''"prepare-<directory>"'';
+        description = ''
+          WHAT THIS STEP IS CALLED in the pod. A deployment's fact for the same reason a volume name
+          is: a live pod holds the name it was born with, an overlay written against that pod keys on
+          it, and renaming one is a new pod-template hash.
+        '';
+      };
+
+      mountPath = lib.mkOption {
+        type = lib.types.str;
+        default = defaultPrepareMountPath;
+        description = ''
+          WHERE THE TREE APPEARS INSIDE THE HELPER IMAGE while it is being prepared. Container-internal
+          and nothing to do with the server: the helper is a small tool image the deployment chose, so
+          where the deployment mounts the tree inside it is the deployment's too. The `chown` this
+          module renders walks exactly this path.
+        '';
+      };
+    };
+  });
 
   commonOptions = {
     enable = lib.mkOption {
@@ -577,6 +783,41 @@ let
               that is the case nothing else fixes.
             '';
           };
+
+          path = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            example = "/run/secrets/example-bind-password";
+            description = ''
+              WHERE the projected credential lands inside the container, for the volumes the catalogue
+              says are a key out of a Secret rather than durable state. Required for those and
+              meaningless for the rest.
+
+              It is a deployment's answer and not the catalogue's, because the software's actual
+              requirement is that ONE named variable carry this path — not that the path be any
+              particular string. That variable is rendered FROM this value, so the file's location is
+              written down exactly once and a mount and an environment cannot disagree about it.
+
+              The filename the key is projected under is this path's BASENAME. Naming it separately
+              would be a second answer to the same question, and the two would differ on the day
+              somebody edited one of them.
+            '';
+          };
+
+          volumeName = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            description = ''
+              THE NAME THIS VOLUME ALREADY CARRIES, for a workload adopted from an object that exists.
+              Defaults to the catalogue's own key for the directory, which is what anything declared
+              from scratch wants.
+
+              It is here because a volume name is part of the pod template rather than a label on it:
+              a live pod holds whichever name it was born with, and renaming one is a new template
+              hash — which, for a server that must stop before it starts again, is an outage rather
+              than a rename.
+            '';
+          };
         };
       });
     };
@@ -626,6 +867,136 @@ let
       type = lib.types.listOf lib.types.str;
       default = [ ];
       description = "Arguments appended to whatever the catalogue sets.";
+    };
+
+    prestart = {
+      prepare = lib.mkOption {
+        type = lib.types.attrsOf prepareStepType;
+        default = { };
+        description = ''
+          The step that takes ownership of a tree the image cannot take ownership of itself, keyed by
+          the SAME directory name the catalogue uses. THAT the step is needed is the catalogue's
+          answer and cannot be overruled here; what it is CALLED and where it mounts the tree while it
+          works are this deployment's, and naming a directory the catalogue does not prepare is an
+          eval error rather than a step nothing renders.
+        '';
+      };
+
+      databaseWait = lib.mkOption {
+        default = { };
+        description = ''
+          The step that blocks the process until the SQL engine accepts connections, for the servers
+          the catalogue says do not run one. WHETHER it is rendered follows from the catalogue and
+          from `database`; what it is called and what it says while it waits are this deployment's.
+        '';
+        type = lib.types.submodule {
+          options = {
+            name = lib.mkOption {
+              type = lib.types.str;
+              default = "wait-for-database";
+              description = ''
+                WHAT THIS STEP IS CALLED in the pod — the same adoption fact as every other container
+                name, and the key any overlay written against the live object uses.
+              '';
+            };
+
+            notice = lib.mkOption {
+              type = lib.types.strMatching "[^[:space:]]+";
+              default = "waiting-for-database";
+              description = ''
+                WHAT THE WAIT PRINTS on each attempt. One word, because it is echoed unquoted inside
+                the loop, and it is a deployment's word: it is the line somebody reads in a pod's logs
+                at the moment the engine is down, so it names the engine in whatever vocabulary that
+                cluster's operator actually uses.
+              '';
+            };
+          };
+        };
+      };
+    };
+
+    probeBudget = {
+      initialDelaySeconds = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.unsigned;
+        default = null;
+        description = ''
+          How long to wait before probing at all, overriding the catalogue's own number. `null` (the
+          default) keeps it.
+
+          THE SHAPE IS NOT HERE. Which endpoint answers, on which port, and whether this software
+          should be probed at all, is true of the software everywhere and stays in the catalogue.
+          These four numbers are the part that is about a disk: the same server is patient enough at
+          very different budgets on different hardware. A budget given to a server the catalogue
+          probes not at all is refused rather than promoted into a probe.
+        '';
+      };
+
+      periodSeconds = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = null;
+        description = "Interval between probes, overriding the catalogue's own number.";
+      };
+
+      failureThreshold = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = null;
+        description = ''
+          Consecutive failures tolerated, overriding the catalogue's own number. With
+          `periodSeconds` this is the whole tolerated cold start, and it is the number that decides
+          whether a slow first boot reads as a slow first boot or as a failure.
+        '';
+      };
+
+      timeoutSeconds = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = null;
+        description = "How long one probe may take before it counts as failed.";
+      };
+    };
+
+    resources = {
+      cpuRequest = lib.mkOption {
+        type = lib.types.nullOr quantityType;
+        default = null;
+        example = "200m";
+        description = ''
+          CPU the scheduler must find for this server. A claim on ONE cluster's hardware, next to
+          whatever else that cluster runs — the same software is correctly sized at very different
+          numbers on a small node and a real one — so it is a declaration's answer and the catalogue
+          holds none.
+
+          FOUR NAMED SCALARS AND NOT A QUANTITY MAP, deliberately. Nothing this repository catalogues
+          burns a GPU or any other extended resource, and a free-form map would be a surface on which
+          a chat server could claim a card.
+        '';
+      };
+
+      memoryRequest = lib.mkOption {
+        type = lib.types.nullOr quantityType;
+        default = null;
+        example = "512Mi";
+        description = "Memory the scheduler must find for this server. A container with none is placed as if it were free.";
+      };
+
+      cpuLimit = lib.mkOption {
+        type = lib.types.nullOr quantityType;
+        default = null;
+        description = ''
+          Ceiling on CPU. A throttle rather than a kill, which is rarely what a chat server wants: a
+          throttled process still holds every websocket it had, it just answers them late.
+        '';
+      };
+
+      memoryLimit = lib.mkOption {
+        type = lib.types.nullOr quantityType;
+        default = null;
+        example = "2Gi";
+        description = ''
+          Ceiling on memory, and a kill threshold rather than a throttle. On a server that may not
+          idle it is the one number that can end a conversation mid-sentence, which is an argument for
+          setting it deliberately rather than for leaving it off.
+        '';
+      };
     };
 
     image = lib.mkOption {
@@ -680,7 +1051,11 @@ in
           exposure = "public";
           env.TUWUNEL_SERVER_NAME = "example.com";
           state.database.hostPath = "/example/state/homeserver";
-          state.ldap-password = { secret = "example-homeserver-secrets"; key = "example-bind-password"; };
+          state.ldap-password = {
+            secret = "example-homeserver-secrets";
+            key = "example-bind-password";
+            path = "/run/secrets/example-bind-password";
+          };
         };
       }
     '';
@@ -717,6 +1092,7 @@ in
     nixidy.assertions =
       catalogueAssertions
       ++ stateAssertions
+      ++ deploymentAssertions
       ++ dependencyAssertions
       ++ idleAssertions
       ++ anchorAssertions

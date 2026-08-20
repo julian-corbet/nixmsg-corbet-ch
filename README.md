@@ -62,8 +62,9 @@ Left unset, `channel` auto-resolves to the best available channel (repo > aur > 
 | `modules/home.nix` | Home-manager: autostart + workspace-pin. |
 | `lib/servers.nix` | The server catalogue: what each cluster-side server IS — ports, the directories it writes, whether it runs its own database, how patient a probe must be. |
 | `modules/cluster.nix` | The cluster translator: declares into the `nixk3s` app grammar and renders no Kubernetes object of its own. |
-| `examples/all/values.nix` | A complete invented declaration of both servers, rendered by `nix flake check`. |
-| `checks/` | `nix flake check` — eval-time proof of `flatpakApps` and the autostart commands, plus the cluster module's guards and the manifests they produce. |
+| `examples/all/values.nix` | A complete invented declaration of both servers, greenfield: every name is the catalogue's and every number is its default. |
+| `examples/adopted/values.nix` | The same two servers declared against objects that ALREADY exist — every live name kept, every number this cluster's. The surface that decides whether the vocabulary can be adopted without a rollout. |
+| `checks/` | `nix flake check` — eval-time proof of `flatpakApps` and the autostart commands, plus the cluster module's guards, the manifests they produce, and the adopted surface reproducing an object that already exists. |
 
 ## The cluster plane
 
@@ -91,8 +92,32 @@ nixmsg.servers.chat = {
   database = { host = "postgres"; port = 5432; };
   state.data = { hostPath = "/srv/chat"; owner = { uid = 2000; gid = 2000; }; };
   secrets.chat-env.envFrom = true;
+
+  resources = { cpuRequest = "200m"; memoryRequest = "512Mi"; memoryLimit = "2Gi"; };
+  probeBudget.failureThreshold = 24;         # the catalogue's endpoint, this disk's patience
 };
 ```
+
+### The five things only a deployment can answer
+
+Each of these looks at first like something a catalogue ought to know, and none of them is. They
+exist because a workload that already runs has to be re-declarable in this vocabulary **without the
+manifest moving** — both servers here declare durable state, which forces `Recreate`, so a changed
+pod template is not a refactor but a stop-then-start: an outage for team chat, dropped inbound
+federation for a homeserver.
+
+| Term | What it answers | Why it is not knowledge |
+|---|---|---|
+| `resources.{cpu,memory}{Request,Limit}` | one cluster's share of a node | the same software is correctly sized at very different numbers on different hardware. Four named scalars, not a quantity map: nothing catalogued here burns a GPU, so nothing here can ask for one |
+| `probeBudget.*` | how patient the probe is | the catalogue decides the probe's SHAPE — which endpoint, which port, whether to probe at all — and the budget is a fact about a disk. A budget given to a server the catalogue probes not at all is refused rather than promoted into a probe |
+| `state.<name>.path` | where a projected credential lands | the software's requirement is that ONE named variable carry the file's path, not that the path be any particular string. The module renders that variable FROM the mount, so the location is written down exactly once |
+| `state.<name>.volumeName`, `prestart.*.name` | what things are CALLED in a live pod | a volume name and a container name are part of the pod template rather than labels on it |
+| `prestart.prepare.<name>.mountPath`, `prestart.databaseWait.notice` | what the helper steps do inside their own image | the helper image is the deployment's choice, so the path it mounts the tree at and the line it prints while waiting are the deployment's too |
+
+WHETHER each of those happens at all still belongs to the catalogue: that a tree must be prepared,
+that an engine must be waited for, that a credential arrives as a file, that this server is probed.
+A declaration renames and retunes; it cannot add a step the catalogue did not ask for, and naming
+one for a directory the catalogue does not prepare is an eval error.
 
 The guards are the point. Backing a directory the server does not write, or leaving one it does
 write unbacked, is an eval error. So is backing durable history with a Secret, or a projected

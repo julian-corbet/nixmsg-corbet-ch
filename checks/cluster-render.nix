@@ -60,10 +60,14 @@ pkgs.runCommand "nixmsg-cluster-render"
 
   echo "== the credential is a FILE, projected one key wide, not a whole Secret over a directory =="
   check "projected key"  "example-bind-password" "$(y '.spec.template.spec.volumes[] | select(.name == "ldap-password") | .secret.items[0].key' $homed)"
-  check "projected path" "ldap-bind-password"    "$(y '.spec.template.spec.volumes[] | select(.name == "ldap-password") | .secret.items[0].path' $homed)"
+  check "projected path" "example-bind-password"    "$(y '.spec.template.spec.volumes[] | select(.name == "ldap-password") | .secret.items[0].path' $homed)"
   check "projected count" "1" "$(y '[.spec.template.spec.volumes[] | select(.name == "ldap-password") | .secret.items[]] | length' $homed)"
-  check "landed as a file" "ldap-bind-password" "$(y '.spec.template.spec.containers[0].volumeMounts[] | select(.name == "ldap-password") | .subPath' $homed)"
-  check "and where it is read" "/run/secrets/ldap-bind-password" "$(y '.spec.template.spec.containers[0].env[] | select(.name == "TUWUNEL_LDAP__BIND_PASSWORD_FILE") | .value' $homed)"
+  check "landed as a file" "example-bind-password" "$(y '.spec.template.spec.containers[0].volumeMounts[] | select(.name == "ldap-password") | .subPath' $homed)"
+  # THE PATH IS THE DECLARATION'S AND THE VARIABLE IS DERIVED FROM IT. Read back off the manifest
+  # rather than off the options, because "the file is where the process was told" is a property of
+  # two fields in two different places, and this is the only place both of them exist at once.
+  check "landed where the declaration said" "/run/secrets/example-bind-password" "$(y '.spec.template.spec.containers[0].volumeMounts[] | select(.name == "ldap-password") | .mountPath' $homed)"
+  check "and where it is read" "/run/secrets/example-bind-password" "$(y '.spec.template.spec.containers[0].env[] | select(.name == "TUWUNEL_LDAP__BIND_PASSWORD_FILE") | .value' $homed)"
 
   echo "== the other key of the same Secret is a variable, referenced and never carried =="
   check "token by reference" "example-homeserver-secrets" "$(y '.spec.template.spec.containers[0].env[] | select(.name == "TUWUNEL_REGISTRATION_TOKEN") | .valueFrom.secretKeyRef.name' $homed)"
@@ -79,11 +83,16 @@ pkgs.runCommand "nixmsg-cluster-render"
   check "chat waits by name, never by address" "true" "$(y '.spec.template.spec.initContainers[] | select(.name == "wait-for-database") | .command[-1]' $chatd | grep -q 'nc -z example-database 5432' && echo true || echo false)"
   check "homeserver has nothing to wait for" "null" "$(y '.spec.template.spec.initContainers' $homed)"
 
-  echo "== the probe budget is the catalogue's, and a server given no probe gets none invented =="
+  echo "== the probe budget is the catalogue's until a deployment retunes it, and none is invented =="
   check "chat probe path" "/api/v4/system/ping" "$(y '.spec.template.spec.containers[0].readinessProbe.httpGet.path' $chatd)"
   check "chat probe patience" "18" "$(y '.spec.template.spec.containers[0].readinessProbe.failureThreshold' $chatd)"
+  check "chat probe delay" "20" "$(y '.spec.template.spec.containers[0].readinessProbe.initialDelaySeconds' $chatd)"
   check "homeserver readiness" "null" "$(y '.spec.template.spec.containers[0].readinessProbe' $homed)"
   check "homeserver liveness" "null" "$(y '.spec.template.spec.containers[0].livenessProbe' $homed)"
+
+  echo "== a hardware budget nobody declared is a hardware budget nobody renders =="
+  check "chat resources" "null" "$(y '.spec.template.spec.containers[0].resources' $chatd)"
+  check "homeserver resources" "null" "$(y '.spec.template.spec.containers[0].resources' $homed)"
 
   echo "== a role resolves to a number one layer down, and no number was ever written up here =="
   check "homeserver runAsUser" "4242" "$(y '.spec.template.spec.securityContext.runAsUser' $homed)"
