@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check-x86_64:
+    name: nix flake check (x86_64-linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: verify native runner and build every declared check
+        run: |
+          set -euo pipefail
+          actual=$(nix eval --impure --raw --expr builtins.currentSystem)
+          if [ "$actual" != "x86_64-linux" ]; then
+            echo "runner is '$actual', expected 'x86_64-linux'" >&2
+            exit 1
+          fi
+          nix flake check --keep-going --print-build-logs
+
+  eval-aarch64:
+    name: native aarch64 evaluation
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: verify native runner and evaluate the declared checks
+        run: |
+          set -euo pipefail
+          actual=$(nix eval --impure --raw --expr builtins.currentSystem)
+          if [ "$actual" != "aarch64-linux" ]; then
+            echo "runner is '$actual', expected 'aarch64-linux'" >&2
+            exit 1
+          fi
+          # The flake deliberately declares only x86_64 build checks. Evaluate that complete
+          # surface on native aarch64 without pretending an undeclared ARM derivation was built.
+          nix flake check --all-systems --no-build --keep-going --print-build-logs
+
+  eval-all-systems:
+    name: every declared system evaluates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: nix flake check --all-systems --no-build
+        run: nix flake check --all-systems --no-build --keep-going --print-build-logs
