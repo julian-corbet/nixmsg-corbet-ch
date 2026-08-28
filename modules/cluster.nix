@@ -61,22 +61,28 @@
 # putting them in one namespace means one bad manifest or one prune slip reaches both. So
 # `namespace` is required per workload and defaulted nowhere — forgetting it fails eval, which is
 # the honest outcome for a question this repository cannot answer on a consumer's behalf.
+{ mkConsumerModule }:
 { config, lib, ... }:
 
 let
   cfg = config.nixmsg;
   platform = cfg.clusterPlatform;
-  catalogue = (import ../lib/servers.nix { }).servers;
+  sourceCatalogue = (import ../lib/servers.nix { }).servers;
+  catalogue = lib.mapAttrs
+    (_: entry: entry // {
+      idleSafe = {
+        safe = entry.mayIdle;
+        severity = "refuse";
+        because =
+          "Messaging servers may not idle: work arrives from outside whether or not anybody has "
+          + "opened a client. At zero replicas the request that would have woken the server is the "
+          + "request that was supposed to be delivered.";
+      };
+    })
+    sourceCatalogue;
 
   declared = lib.filterAttrs (_: w: w.enable) cfg.servers;
   workloads = lib.mapAttrsToList (name: w: { inherit name w; entry = catalogue.${w.app}; }) declared;
-
-  # A whole reference wins over a repository plus a tag, which is what pinning by digest looks like.
-  # The catalogue carries neither: a version is a deployment's choice and a digest is one
-  # deployment's proof of what it is running.
-  imageOf = entry: w: if w.image != null then w.image else "${entry.image}:${w.version}";
-
-  portsOf = entry: lib.mapAttrs (_: number: { inherit number; }) entry.ports;
 
   # THE NAME THE VOLUME CARRIES IN THE RENDERED POD. The catalogue's key for it by default, which is
   # what a workload declared from scratch wants and what keeps the two names from drifting. A
@@ -242,31 +248,19 @@ let
         // lib.filterAttrs (_: v: v != null) w.probeBudget;
     };
 
-  # Handed to the band model only when the consumer says it is part of the render: `origin` and
-  # `slot` are ITS terms, and defining them into a render that does not declare them is an eval
-  # error rather than a graceful no-op.
-  addressingOf = w:
-    lib.optionalAttrs (platform.origin != null) {
-      origin = platform.origin;
-      inherit (w) slot;
-    };
-
-  mkApp = x:
-    let inherit (x) entry w; in
-    {
-      inherit (w) namespace createNamespace project exposure scaling adopt;
-      image = imageOf entry w;
-      ports = portsOf entry;
-      state = stateOf entry w;
-      secrets = secretsOf w;
-      env = envOf entry w;
-      args = entry.args ++ w.args;
-      probes = probesOf entry w;
-      resources = resourcesOf w;
-      init = initOf entry w;
-    }
-    // lib.optionalAttrs (w.identity != null) { inherit (w) identity; }
-    // addressingOf w;
+  # The factory owns the common application record. These are the four domain-shaped projections
+  # whose public declarations deliberately predate the common vocabulary: projected credential
+  # files, the two parameterised pre-start recipes, role-agnostic Secret consumption, and the
+  # cluster-specific probe/resource knobs. Keeping them in one extension preserves that surface
+  # without making a second renderer.
+  extendApp = { entry, w, app, ... }: app // {
+    state = stateOf entry w;
+    secrets = secretsOf w;
+    env = envOf entry w;
+    probes = probesOf entry w;
+    resources = resourcesOf w;
+    init = initOf entry w;
+  };
 
   # ── Assertions ────────────────────────────────────────────────────────────────────────────────
 
@@ -570,13 +564,6 @@ let
             + "is owned by somebody else — grant that one container uid 0 on the rendered object. This "
             + "vocabulary has no term for it by construction: a per-container identity grants rather than "
             + "restricts.";
-        }
-        {
-          when = w.slot != null && platform.origin == null;
-          message =
-            "nixmsg: server `${name}` claims slot ${toString w.slot}, and `nixmsg.clusterPlatform.origin` "
-            + "is unset — so the number is checked for collisions inside this repository and by nothing "
-            + "for which RANGE it may come from.";
         }
       ])
     workloads;
@@ -1041,9 +1028,8 @@ let
       '';
     };
   };
-in
-{
-  options.nixmsg.clusterPlatform = {
+
+  platformOptions = {
     project = lib.mkOption {
       type = lib.types.str;
       default = "chat";
@@ -1062,72 +1048,94 @@ in
     };
   };
 
-  options.nixmsg.servers = lib.mkOption {
-    default = { };
-    description = ''
-      The messaging servers that run in the cluster, keyed by a name of your choosing.
+  serverDescription = ''
+    The messaging servers that run in the cluster, keyed by a name of your choosing.
 
-      THE ENUM IS THE HOUSE RULE. It is built from `lib/servers.nix`, so a server this repository
-      does not catalogue is not a refused value here — it is not a value at all. What belongs in that
-      catalogue is software whose job is carrying messages between people; the clients that read
-      those messages are the other file's subject.
-    '';
-    example = lib.literalExpression ''
-      {
-        example-homeserver = {
-          app = "tuwunel";
-          version = "0.0.0";
-          namespace = "example-matrix";
-          createNamespace = true;
-          exposure = "public";
-          env.TUWUNEL_SERVER_NAME = "example.com";
-          state.database.hostPath = "/example/state/homeserver";
-          state.ldap-password = {
-            secret = "example-homeserver-secrets";
-            key = "example-bind-password";
-            path = "/run/secrets/example-bind-password";
-          };
-        };
-      }
-    '';
-    type = lib.types.attrsOf (lib.types.submodule ({ name, ... }: {
-      options = commonOptions // {
-        app = lib.mkOption {
-          type = lib.types.enum (lib.attrNames catalogue);
-          description = "Which server, from the catalogue. Available: ${lib.concatStringsSep ", " (lib.attrNames catalogue)}.";
-        };
+    THE ENUM IS THE HOUSE RULE. It is built from `lib/servers.nix`, so a server this repository
+    does not catalogue is not a refused value here — it is not a value at all. What belongs in that
+    catalogue is software whose job is carrying messages between people; the clients that read
+    those messages are the other file's subject.
+  '';
 
-        version = lib.mkOption {
-          type = lib.types.str;
-          description = "Which version this workload runs, used as the image tag. Required, and defaulted nowhere.";
+  serverExample = lib.literalExpression ''
+    {
+      example-homeserver = {
+        app = "tuwunel";
+        version = "0.0.0";
+        namespace = "example-matrix";
+        createNamespace = true;
+        exposure = "public";
+        env.TUWUNEL_SERVER_NAME = "example.com";
+        state.database.hostPath = "/example/state/homeserver";
+        state.ldap-password = {
+          secret = "example-homeserver-secrets";
+          key = "example-bind-password";
+          path = "/run/secrets/example-bind-password";
         };
       };
-    }));
+    }
+  '';
+
+  # Keep the established declaration schema exact. The factory owns the terms whose types and
+  # defaults already agree; the remaining terms are disabled-common replacements or domain terms.
+  # In particular, `state` stays narrow because a projected credential is not merely the common
+  # Secret backing: its key, mount path and derived path variable are one coupled declaration.
+  enabledOptions = [
+    "createNamespace"
+    "project"
+    "slot"
+    "exposure"
+    "scaling"
+    "adopt"
+    "identity"
+    "env"
+    "args"
+  ];
+
+  serverOptions = builtins.removeAttrs commonOptions ([ "enable" ] ++ enabledOptions) // {
+    version = lib.mkOption {
+      type = lib.types.str;
+      description = "Which version this workload runs, used as the image tag. Required, and defaulted nowhere.";
+    };
   };
 
-  # ── Computed, read-only ───────────────────────────────────────────────────────────────────────
-  options.nixmsg.clusterSlots = lib.mkOption {
-    type = lib.types.attrsOf lib.types.ints.unsigned;
-    readOnly = true;
-    default = lib.listToAttrs
-      (map (x: lib.nameValuePair x.name x.w.slot) (lib.filter (x: x.w.slot != null) workloads));
-    defaultText = lib.literalExpression "every declared workload that claims a slot";
-    description = ''
-      workload -> the position it claims. Nothing is rendered from it here: what an address looks
-      like is the private layer's business, and this is what that layer reads to build one.
-    '';
-  };
+  factoryModule = mkConsumerModule {
+    namespace = "nixmsg";
+    optionPath = [ "nixmsg" ];
+    publishPlatformOptions = false;
+    platformOf = { consumer, ... }: {
+      inherit (consumer.clusterPlatform) project origin;
+    };
+    originOptionPath = [ "nixmsg" "clusterPlatform" "origin" ];
+    extraNamespaceOptions.clusterPlatform = platformOptions;
 
-  config = {
-    nixk3s.apps = lib.listToAttrs (map (x: lib.nameValuePair x.name (mkApp x)) workloads);
-    nixidy.assertions =
-      catalogueAssertions
-      ++ stateAssertions
-      ++ deploymentAssertions
-      ++ dependencyAssertions
-      ++ idleAssertions
-      ++ anchorAssertions
-      ++ slotAssertions;
-    nixidy.warnings = warnings;
+    roots.servers = {
+      inherit catalogue enabledOptions;
+      selector = "app";
+      selectorDescription =
+        "Which server, from the catalogue. Available: "
+        + lib.concatStringsSep ", " (lib.attrNames catalogue) + ".";
+      extraOptions = serverOptions;
+      volumeNameOf = { w, ... }: key: volumeNameOf key w.state.${key};
+      extend = extendApp;
+      description = serverDescription;
+      example = serverExample;
+
+      # The factory owns the common image, tenancy, anchor, slot and idle-safety rules. These are
+      # the domain's projected-file, pre-start, required-environment and exact backing contracts.
+      assertions = _workloads:
+        catalogueAssertions
+        ++ stateAssertions
+        ++ deploymentAssertions
+        ++ dependencyAssertions
+        ++ idleAssertions
+        ++ anchorAssertions
+        ++ slotAssertions;
+
+      warnings = _workloads: warnings;
+    };
   };
+in
+{
+  imports = [ factoryModule ];
 }

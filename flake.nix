@@ -19,10 +19,9 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # THE APP GRAMMAR THIS REPOSITORY CONSUMES, and the point being proven rather than a shortcut: a
-    # consumer imports the grammar itself, and this input exists so the checks can render the cluster
-    # module through the REAL grammar and assert what comes out — rather than asserting that a module
-    # which merely mentions `nixk3s.apps` evaluates.
+    # THE APP GRAMMAR AND CONSUMER FACTORY THIS REPOSITORY CONSUMES. The exported cluster module is
+    # constructed by the matching factory, and the checks render it through the real grammar rather
+    # than asserting that a module which merely mentions `nixk3s.apps` evaluates.
     nixk3s = {
       url = "github:julian-corbet/nixk3s-corbet-ch";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -63,8 +62,10 @@
 
       # ── The cluster plane: the SERVERS those clients talk to ────────────────────────────────
       # Only one module in the class, so `.default` is honest rather than invented.
-      nixidyModules.nixmsg = ./modules/cluster.nix;
-      nixidyModules.default = ./modules/cluster.nix;
+      nixidyModules.nixmsg = import ./modules/cluster.nix {
+        mkConsumerModule = nixk3s.lib.mkConsumerModule;
+      };
+      nixidyModules.default = self.nixidyModules.nixmsg;
 
       # The catalogues, exposed so a consumer can inspect or validate either without re-reading the
       # file. Two of them because the subject has two planes, not because it has two halves of one
