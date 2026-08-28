@@ -1029,25 +1029,6 @@ let
     };
   };
 
-  platformOptions = {
-    project = lib.mkOption {
-      type = lib.types.str;
-      default = "chat";
-      description = "Delivery project these servers' Applications belong to unless a declaration says otherwise.";
-    };
-
-    origin = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = ''
-        THE IDENTITY THIS REPOSITORY'S SERVERS ARE ADDRESSED UNDER, when the render composes the band
-        model. A repository naming itself is not a fleet fact; which band that name binds is, and it
-        lives in whatever repository owns the fleet. Left null, slots are still checked for collisions
-        here and by nothing for range.
-      '';
-    };
-  };
-
   serverDescription = ''
     The messaging servers that run in the cluster, keyed by a name of your choosing.
 
@@ -1102,12 +1083,6 @@ let
   factoryModule = mkConsumerModule {
     namespace = "nixmsg";
     optionPath = [ "nixmsg" ];
-    publishPlatformOptions = false;
-    platformOf = { consumer, ... }: {
-      inherit (consumer.clusterPlatform) project origin;
-    };
-    originOptionPath = [ "nixmsg" "clusterPlatform" "origin" ];
-    extraNamespaceOptions.clusterPlatform = platformOptions;
 
     roots.servers = {
       inherit catalogue enabledOptions;
@@ -1133,6 +1108,12 @@ let
         ++ slotAssertions;
 
       warnings = _workloads: warnings;
+    };
+
+    # The factory owns the existing `clusterPlatform.project` and `.origin` option paths. Restore
+    # the one domain default the generic platform cannot choose on a consumer's behalf.
+    extraConfig = _workloads: {
+      nixmsg.clusterPlatform.project = lib.mkOptionDefault "chat";
     };
   };
 in
