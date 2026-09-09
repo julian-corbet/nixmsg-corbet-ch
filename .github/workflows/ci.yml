@@ -8,6 +8,8 @@ on:
 
 jobs:
   check-x86_64:
+    # Crow runs this portable gate; retain hosted manual/tag/release fallback.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'release' || startsWith(github.ref, 'refs/tags/') }}
     name: nix flake check (x86_64-linux)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -50,6 +52,8 @@ jobs:
           nix flake check --all-systems --no-build --keep-going --print-build-logs
 
   eval-all-systems:
+    # Crow runs this portable gate; retain hosted manual/tag/release fallback.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'release' || startsWith(github.ref, 'refs/tags/') }}
     name: every declared system evaluates
     runs-on: ubuntu-latest
     timeout-minutes: 15
